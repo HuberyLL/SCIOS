@@ -48,7 +48,12 @@ export function ProgressView({ taskId, onComplete, onRetry }: ProgressViewProps)
     });
   }, [messages]);
 
-  const progress = estimateProgress(messages);
+  const progress =
+    status === "completed"
+      ? 100
+      : status === "running" && messages.length === 0
+        ? 12
+        : estimateProgress(messages);
   const failed = status === "failed";
 
   return (

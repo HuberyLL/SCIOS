@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o"
 
     # -- Database -----------------------------------------------------------
-    db_path: str = "data/scios.db"
+    db_path: str = "../data/scios.db"
 
     # -- Monitoring scheduler -----------------------------------------------
     monitoring_cron_hour: int = 8

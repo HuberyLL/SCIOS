@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Lightbulb,
@@ -192,9 +192,8 @@ function MustReadPapersSection({ report }: { report: ExplorationReport }) {
           </TableHeader>
           <TableBody>
             {report.must_read_papers.map((p, i) => (
-              <>
+              <React.Fragment key={`paper-${i}`}>
                 <TableRow
-                  key={`row-${i}`}
                   className="cursor-pointer"
                   onClick={() => setOpenSummary(openSummary === i ? null : i)}
                 >
@@ -242,7 +241,7 @@ function MustReadPapersSection({ report }: { report: ExplorationReport }) {
                     </TableCell>
                   </TableRow>
                 )}
-              </>
+              </React.Fragment>
             ))}
           </TableBody>
         </Table>

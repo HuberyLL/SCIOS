@@ -51,7 +51,7 @@ class ArxivFetcher(BasePaperFetcher):
     """Fetch papers from the arXiv Atom feed API."""
 
     source_name = "arxiv"
-    _API_URL = "http://export.arxiv.org/api/query"
+    _API_URL = "https://export.arxiv.org/api/query"
 
     async def search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
         params = {
@@ -125,8 +125,15 @@ class PubMedFetcher(BasePaperFetcher):
     source_name = "pubmed"
     _SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
     _FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+    _sem = asyncio.Semaphore(2)
+    _MIN_INTERVAL = 0.4
 
     async def search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
+        async with self._sem:
+            await asyncio.sleep(self._MIN_INTERVAL)
+            return await self._do_search(query, max_results=max_results)
+
+    async def _do_search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
         try:
             async with managed_client() as client:
                 search_resp = await client.get(
@@ -144,7 +151,7 @@ class PubMedFetcher(BasePaperFetcher):
                 )
                 fetch_resp.raise_for_status()
         except Exception as exc:
-            logger.error("PubMed search failed: %s", exc)
+            logger.warning("PubMed search failed: %s", exc)
             return []
 
         return self._parse_articles(fetch_resp.text)

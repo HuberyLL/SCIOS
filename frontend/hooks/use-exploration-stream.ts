@@ -19,16 +19,16 @@ const INITIAL_STATE: StreamState = {
 };
 
 export function useExplorationStream(taskId: string | null): StreamState {
-  const [state, setState] = useState<StreamState>(INITIAL_STATE);
+  const [state, setState] = useState<StreamState>(() =>
+    taskId ? { ...INITIAL_STATE, status: "running" } : INITIAL_STATE,
+  );
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!taskId) {
-      setState(INITIAL_STATE);
       return;
     }
 
-    setState({ ...INITIAL_STATE, status: "running" });
     const es = new EventSource(explorationStreamUrl(taskId));
     esRef.current = es;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppHeader } from "@/components/app-header";
 import { SearchHero } from "@/components/exploration/search-hero";
@@ -59,6 +59,43 @@ export default function Home() {
     setReport(null);
   };
 
+  useEffect(() => {
+    if (phase !== "loading" || !taskId) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const pollStatus = async () => {
+      try {
+        const status = await getExplorationStatus(taskId);
+        if (cancelled) return;
+
+        if (status.status === "completed" && status.result) {
+          setReport(status.result);
+          setPhase("completed");
+          return;
+        }
+
+        if (status.status === "failed") {
+          setPhase("failed");
+          return;
+        }
+      } catch {
+        // Keep retrying while SSE may still deliver live updates.
+      }
+
+      if (!cancelled) {
+        timer = setTimeout(pollStatus, 2500);
+      }
+    };
+
+    timer = setTimeout(pollStatus, 2500);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [phase, taskId]);
+
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <AppHeader activeTab={activeTab} onTabChange={setActiveTab} />
@@ -77,23 +114,24 @@ export default function Home() {
 
               {phase === "loading" && taskId && (
                 <ProgressView
+                  key={taskId}
                   taskId={taskId}
                   onComplete={handleStreamComplete}
                   onRetry={handleRetry}
                 />
               )}
 
-              {phase === "failed" && !taskId && (
+              {phase === "failed" && (
                 <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center">
                   <div className="text-center">
                     <p className="mb-4 text-sm text-muted-foreground">
-                      Failed to start exploration. Please try again.
+                      Exploration failed. Please try again.
                     </p>
                     <button
-                      onClick={resetToIdle}
+                      onClick={handleRetry}
                       className="text-sm font-medium underline underline-offset-4"
                     >
-                      Back to search
+                      Retry
                     </button>
                   </div>
                 </div>

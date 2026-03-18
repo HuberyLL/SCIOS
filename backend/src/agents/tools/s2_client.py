@@ -137,10 +137,10 @@ class SemanticScholarClient:
         try:
             data = await self._get("/paper/search", params=params)
         except httpx.HTTPStatusError as exc:
-            logger.error("S2 search failed: %s", exc)
+            logger.warning("S2 search unavailable: %s", exc)
             return SearchResult(query=query)
         except Exception as exc:
-            logger.error("S2 search unexpected error: %s", exc)
+            logger.warning("S2 search unexpected error: %s", exc)
             return SearchResult(query=query)
 
         papers = [_paper_from_api(p) for p in (data.get("data") or [])]
