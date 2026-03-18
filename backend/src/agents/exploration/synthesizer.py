@@ -12,12 +12,14 @@ logger = logging.getLogger(__name__)
 
 MAX_ABSTRACT_CHARS = 300
 MAX_WEB_SNIPPET_CHARS = 500
+DEFAULT_MAX_PAPERS = 40
 
 
-def _format_context(raw: RawRetrievedData) -> str:
+def _format_context(raw: RawRetrievedData, *, max_papers: int = DEFAULT_MAX_PAPERS) -> str:
     """Serialize *RawRetrievedData* into a compact text block for the prompt.
 
-    Truncates abstracts and web snippets to stay within token budget.
+    Papers are deduplicated by title, sorted by citation count (highest first),
+    and capped at *max_papers* to stay within the model's context window.
     """
     sections: list[str] = []
 
@@ -35,6 +37,11 @@ def _format_context(raw: RawRetrievedData) -> str:
         seen_titles.add(key)
         deduped.append(p)
 
+    deduped.sort(key=lambda p: p.citation_count, reverse=True)
+
+    omitted = max(0, len(deduped) - max_papers)
+    deduped = deduped[:max_papers]
+
     if deduped:
         lines = []
         for i, p in enumerate(deduped, 1):
@@ -48,6 +55,8 @@ def _format_context(raw: RawRetrievedData) -> str:
                 f"     Source: {p.source}  |  URL: {p.url}\n"
                 f"     Abstract: {abstract}"
             )
+        if omitted:
+            lines.append(f"(… and {omitted} more papers omitted)")
         sections.append("## Papers\n" + "\n\n".join(lines))
 
     if raw.citation_map:
@@ -76,9 +85,11 @@ def _format_context(raw: RawRetrievedData) -> str:
 async def synthesize_report(
     topic: str,
     raw_data: RawRetrievedData,
+    *,
+    max_papers: int = DEFAULT_MAX_PAPERS,
 ) -> ExplorationReport:
     """Call the LLM to produce a structured ``ExplorationReport``."""
-    context_text = _format_context(raw_data)
+    context_text = _format_context(raw_data, max_papers=max_papers)
     logger.debug("Synthesizer context length: %d chars", len(context_text))
 
     messages = [

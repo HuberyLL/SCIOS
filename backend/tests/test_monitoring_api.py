@@ -175,6 +175,48 @@ class TestListBriefs:
 
 
 # ===================================================================
+# API — DELETE /api/v1/monitoring/tasks/{task_id}
+# ===================================================================
+
+
+class TestDeleteMonitorTask:
+    async def test_404_for_unknown_task(self, client):
+        resp = await client.delete("/api/v1/monitoring/tasks/no-such-id")
+        assert resp.status_code == 404
+
+    async def test_delete_task_and_related_briefs(self, client):
+        create_resp = await client.post(
+            "/api/v1/monitoring/tasks",
+            json={"topic": "deletable topic", "frequency": "daily"},
+        )
+        task_id = create_resp.json()["data"]["id"]
+
+        engine = get_engine()
+        with Session(engine) as session:
+            session.add(
+                MonitorBrief(
+                    task_id=task_id,
+                    brief_content=FAKE_BRIEF.model_dump(mode="json"),
+                )
+            )
+            session.commit()
+
+        delete_resp = await client.delete(f"/api/v1/monitoring/tasks/{task_id}")
+        assert delete_resp.status_code == 200
+        payload = delete_resp.json()["data"]
+        assert payload["id"] == task_id
+        assert payload["deleted"] is True
+
+        with Session(engine) as session:
+            task = session.get(MonitorTask, task_id)
+            briefs = session.exec(
+                select(MonitorBrief).where(MonitorBrief.task_id == task_id)
+            ).all()
+            assert task is None
+            assert briefs == []
+
+
+# ===================================================================
 # Scheduler — run_daily_jobs
 # ===================================================================
 

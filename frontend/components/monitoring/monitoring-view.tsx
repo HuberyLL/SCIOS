@@ -1,19 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { SubscribeForm } from "./subscribe-form";
 import { TaskList } from "./task-list";
 import { BriefDetail } from "./brief-detail";
-import { listMonitorTasks } from "@/lib/api";
-import type { MonitorTaskData } from "@/types";
+import { deleteMonitorTask, listMonitorTasks, monitoringStreamUrl } from "@/lib/api";
+import type { MonitorTaskData, MonitoringSSEEvent } from "@/types";
 
 export function MonitoringView() {
   const [tasks, setTasks] = useState<MonitorTaskData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshSignal, setRefreshSignal] = useState(0);
+  const selectedIdRef = useRef<string | null>(null);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -30,8 +32,64 @@ export function MonitoringView() {
     fetchTasks();
   }, [fetchTasks]);
 
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
+    const es = new EventSource(monitoringStreamUrl());
+
+    es.onmessage = (ev) => {
+      try {
+        const event = JSON.parse(ev.data) as MonitoringSSEEvent;
+        if (
+          event.type === "task_started" ||
+          event.type === "task_completed" ||
+          event.type === "task_failed"
+        ) {
+          fetchTasks();
+          if (selectedIdRef.current && event.task_id === selectedIdRef.current) {
+            setRefreshSignal((n) => n + 1);
+          }
+        }
+      } catch {
+        // Ignore malformed SSE payloads.
+      }
+    };
+
+    es.onerror = () => {
+      // Browser auto-reconnects EventSource; no manual retry needed here.
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [fetchTasks]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      fetchTasks();
+    }, 12000);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [fetchTasks]);
+
   const handleCreated = () => {
     fetchTasks();
+  };
+
+  const handleDelete = async (taskId: string) => {
+    try {
+      await deleteMonitorTask(taskId);
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      if (selectedId === taskId) {
+        setSelectedId(null);
+      }
+    } catch {
+      // keep current list unchanged on delete failure
+    }
   };
 
   const selectedTask = tasks.find((t) => t.id === selectedId);
@@ -66,6 +124,7 @@ export function MonitoringView() {
               tasks={tasks}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              onDelete={handleDelete}
             />
           )}
         </div>
@@ -75,6 +134,7 @@ export function MonitoringView() {
           <BriefDetail
             taskId={selectedId}
             taskTopic={selectedTask?.topic}
+            refreshSignal={refreshSignal}
           />
         </div>
       </div>

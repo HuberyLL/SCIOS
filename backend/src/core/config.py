@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     crossref_mailto: str = ""
     openalex_mailto: str = ""
 
+    # -- Source routing (Planner-hints-first) --------------------------------
+    source_routing_enabled: bool = True
+    source_routing_confidence_threshold: float = 0.6
+    source_routing_max_sources: int = 3
+    source_routing_stage_b_enabled: bool = True
+    source_routing_min_papers_stage_b: int = 5
+
+    # -- Synthesizer --------------------------------------------------------
+    synthesizer_max_papers: int = 40
+
     # -- Email notification (SMTP) ------------------------------------------
     smtp_server: str = ""
     smtp_port: int = 465

@@ -13,6 +13,20 @@ import type { BriefData, DailyBrief } from "@/types";
 interface BriefDetailProps {
   taskId: string | null;
   taskTopic?: string;
+  refreshSignal?: number;
+}
+
+function formatLocalDateTime(iso: string): string {
+  const normalized = /([zZ]|[+-]\d{2}:\d{2})$/.test(iso) ? iso : `${iso}Z`;
+  return new Date(normalized).toLocaleString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
 }
 
 function BriefCard({ brief, index }: { brief: BriefData; index: number }) {
@@ -25,17 +39,13 @@ function BriefCard({ brief, index }: { brief: BriefData; index: number }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06 }}
     >
-      <Card className="border-border/40">
+      <Card className="border border-border/40 ring-0">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
               <CardTitle className="text-sm font-medium">
-                {new Date(brief.created_at).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
+                {formatLocalDateTime(brief.created_at)}
               </CardTitle>
             </div>
             <span className="text-[11px] text-muted-foreground">
@@ -133,31 +143,51 @@ function BriefCard({ brief, index }: { brief: BriefData; index: number }) {
   );
 }
 
-export function BriefDetail({ taskId, taskTopic }: BriefDetailProps) {
+export function BriefDetail({ taskId, taskTopic, refreshSignal = 0 }: BriefDetailProps) {
   const [briefs, setBriefs] = useState<BriefData[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!taskId) {
-      setBriefs([]);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-
-    listBriefs(taskId)
-      .then((data) => {
+    Promise.resolve().then(async () => {
+      if (cancelled) return;
+      setLoading(true);
+      try {
+        const data = await listBriefs(taskId);
         if (!cancelled) setBriefs(data);
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setBriefs([]);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    });
 
     return () => {
       cancelled = true;
+    };
+  }, [taskId, refreshSignal]);
+
+  useEffect(() => {
+    if (!taskId) return;
+
+    let cancelled = false;
+    const timer = setInterval(() => {
+      Promise.resolve().then(async () => {
+        try {
+          const data = await listBriefs(taskId);
+          if (!cancelled) setBriefs(data);
+        } catch {
+          // Keep previous data when fallback polling fails once.
+        }
+      });
+    }, 12000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
     };
   }, [taskId]);
 
@@ -194,7 +224,7 @@ export function BriefDetail({ taskId, taskTopic }: BriefDetailProps) {
 
   return (
     <ScrollArea className="h-[calc(100vh-12rem)]">
-      <div className="space-y-4 pr-2">
+      <div className="space-y-4 pr-2 pb-1 pl-1">
         {taskTopic && (
           <h2 className="text-lg font-semibold tracking-tight">{taskTopic}</h2>
         )}

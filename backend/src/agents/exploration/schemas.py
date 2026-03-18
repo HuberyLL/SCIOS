@@ -29,6 +29,47 @@ class SearchPlan(BaseModel):
         min_length=1,
         description="Research sub-directions to guide the Synthesizer.",
     )
+    source_hints: list[str] = Field(
+        default_factory=list,
+        description=(
+            "2-4 paper source identifiers most relevant to the topic, "
+            "e.g. ['arxiv', 'pubmed', 'dblp']."
+        ),
+    )
+    domain_tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "1-2 domain labels classifying the topic, e.g. "
+            "['biomedical', 'computer_science']."
+        ),
+    )
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Planner's confidence in source_hints accuracy (0-1).",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 1.5  –  Router output
+# ---------------------------------------------------------------------------
+
+class RoutedSources(BaseModel):
+    """Validated source list produced by the Router between Planner and Retriever."""
+
+    primary: list[str] = Field(
+        default_factory=list,
+        description="Sources to query in Stage A.",
+    )
+    secondary: list[str] = Field(
+        default_factory=list,
+        description="Extra sources queried in Stage B when Stage A yields too few papers.",
+    )
+    reason: str = Field(
+        default="",
+        description="Human-readable explanation of the routing decision.",
+    )
 
 
 # ---------------------------------------------------------------------------

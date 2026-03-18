@@ -2,6 +2,9 @@
 
 No LLM is involved here — just concurrent I/O via asyncio.gather with
 graceful degradation (empty results never crash the pipeline).
+
+Source selection is driven by the ``RoutedSources`` object produced by the
+Router; the Retriever **never** falls back to all registered sources.
 """
 
 from __future__ import annotations
@@ -11,8 +14,7 @@ import logging
 
 from ..tools import PaperSearcher, SemanticScholarClient, tavily_search
 from ..tools._schemas import PaperResult, SearchResult, WebSearchResult
-from ..tools.sources import DEFAULT_SOURCES
-from .schemas import RawRetrievedData, SearchPlan
+from .schemas import RawRetrievedData, RoutedSources, SearchPlan
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ S2_MAX_PER_KEYWORD = 10
 PAPER_MAX_PER_KEYWORD = 10
 TOP_N_FOR_CITATIONS = 3
 CITATION_LIMIT = 20
+MIN_PAPERS_STAGE_B = 5
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +47,18 @@ async def _search_s2(keywords: list[str]) -> list[SearchResult]:
     return out
 
 
-async def _search_papers(keywords: list[str]) -> list[SearchResult]:
-    """Search multi-source papers for each keyword concurrently."""
+async def _search_papers(
+    keywords: list[str],
+    *,
+    sources: list[str],
+) -> list[SearchResult]:
+    """Search multi-source papers for each keyword concurrently.
+
+    *sources* is an explicit allow-list produced by the Router.
+    """
     searcher = PaperSearcher()
     tasks = [
-        searcher.search(kw, sources=DEFAULT_SOURCES, max_results=PAPER_MAX_PER_KEYWORD)
+        searcher.search(kw, sources=sources, max_results=PAPER_MAX_PER_KEYWORD)
         for kw in keywords
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -74,6 +84,19 @@ async def _search_web(queries: list[str]) -> list[WebSearchResult]:
         else:
             out.append(r)
     return out
+
+
+def _count_unique_papers(results: list[SearchResult]) -> int:
+    """Count papers across *results* after title-based deduplication."""
+    seen: set[str] = set()
+    count = 0
+    for sr in results:
+        for p in sr.papers:
+            key = p.title.strip().lower()
+            if key not in seen:
+                seen.add(key)
+                count += 1
+    return count
 
 
 def _pick_top_cited(results: list[SearchResult], n: int) -> list[PaperResult]:
@@ -123,17 +146,35 @@ async def _fetch_citations(
 # Public API
 # ---------------------------------------------------------------------------
 
-async def fetch_all_context(plan: SearchPlan) -> RawRetrievedData:
-    """Execute the *SearchPlan* and return aggregated raw data.
+async def fetch_all_context(
+    plan: SearchPlan,
+    routed: RoutedSources,
+    *,
+    stage_b_enabled: bool = True,
+    min_papers_stage_b: int = MIN_PAPERS_STAGE_B,
+) -> RawRetrievedData:
+    """Execute the *SearchPlan* using only the sources selected by *routed*.
 
-    All external calls are concurrent; individual failures are logged and
-    replaced with empty results so the pipeline always continues.
+    Stage A queries ``routed.primary``; if that yields fewer than
+    *min_papers_stage_b* papers, Stage B adds ``routed.secondary``.
+    The Retriever **never** opens up to all registered sources.
     """
+    # Stage A — primary sources + S2 + web
     s2_results, paper_results, web_results = await asyncio.gather(
         _search_s2(plan.paper_keywords),
-        _search_papers(plan.paper_keywords),
+        _search_papers(plan.paper_keywords, sources=routed.primary),
         _search_web(plan.web_queries),
     )
+
+    # Stage B — conditional secondary expansion (uses deduped count)
+    unique_a = _count_unique_papers(paper_results)
+    if stage_b_enabled and unique_a < min_papers_stage_b and routed.secondary:
+        logger.info(
+            "Stage A yielded %d unique papers (< %d); expanding with secondary sources %s",
+            unique_a, min_papers_stage_b, routed.secondary,
+        )
+        extra = await _search_papers(plan.paper_keywords, sources=routed.secondary)
+        paper_results.extend(extra)
 
     citation_map = await _fetch_citations(s2_results)
 

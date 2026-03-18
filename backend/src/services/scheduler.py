@@ -6,8 +6,10 @@ via the application lifespan.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -22,6 +24,28 @@ from src.services.notification import send_daily_brief_email
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+_monitor_subscribers: list[asyncio.Queue[dict[str, Any]]] = []
+
+
+def subscribe_monitoring_events() -> asyncio.Queue[dict[str, Any]]:
+    """Register a queue consumer for monitoring scheduler events."""
+    q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    _monitor_subscribers.append(q)
+    return q
+
+
+def unsubscribe_monitoring_events(q: asyncio.Queue[dict[str, Any]]) -> None:
+    """Remove a queue consumer when the SSE connection closes."""
+    try:
+        _monitor_subscribers.remove(q)
+    except ValueError:
+        pass
+
+
+def _publish_monitoring_event(event: dict[str, Any]) -> None:
+    """Broadcast event payload to all monitoring SSE subscribers."""
+    for q in list(_monitor_subscribers):
+        q.put_nowait(event)
 
 
 async def run_daily_jobs() -> None:
@@ -45,10 +69,23 @@ async def run_daily_jobs() -> None:
 
     for task in tasks:
         since = _compute_since_date(task)
+        _publish_monitoring_event({
+            "type": "task_started",
+            "task_id": task.id,
+            "topic": task.topic,
+            "since_date": since,
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
         try:
             brief = await run_monitoring_scan(task.topic, since)
         except Exception:
             logger.exception("Monitoring scan failed for task %s", task.id)
+            _publish_monitoring_event({
+                "type": "task_failed",
+                "task_id": task.id,
+                "topic": task.topic,
+                "at": datetime.now(timezone.utc).isoformat(),
+            })
             continue
 
         with Session(engine) as session:
@@ -67,6 +104,12 @@ async def run_daily_jobs() -> None:
             session.commit()
 
         logger.info("Stored brief for task %s (topic=%s)", task.id, task.topic)
+        _publish_monitoring_event({
+            "type": "task_completed",
+            "task_id": task.id,
+            "topic": task.topic,
+            "at": datetime.now(timezone.utc).isoformat(),
+        })
 
         recipient = task.notify_email or get_settings().notification_email
         if recipient:

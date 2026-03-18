@@ -2,6 +2,7 @@ import type {
   ApiResponse,
   BriefData,
   CreateMonitorRequest,
+  DeleteMonitorTaskData,
   MonitorTaskData,
   TaskStatusData,
 } from "@/types";
@@ -72,9 +73,23 @@ export async function createMonitorTask(
 }
 
 export async function listMonitorTasks(): Promise<MonitorTaskData[]> {
-  return request<MonitorTaskData[]>("/monitoring/tasks");
+  return request<MonitorTaskData[]>("/monitoring/tasks", {
+    cache: "no-store",
+  });
 }
 
 export async function listBriefs(taskId: string): Promise<BriefData[]> {
-  return request<BriefData[]>(`/monitoring/tasks/${taskId}/briefs`);
+  return request<BriefData[]>(`/monitoring/tasks/${taskId}/briefs`, {
+    cache: "no-store",
+  });
+}
+
+export async function deleteMonitorTask(taskId: string): Promise<DeleteMonitorTaskData> {
+  return request<DeleteMonitorTaskData>(`/monitoring/tasks/${taskId}`, {
+    method: "DELETE",
+  });
+}
+
+export function monitoringStreamUrl(): string {
+  return "/api/v1/monitoring/stream";
 }

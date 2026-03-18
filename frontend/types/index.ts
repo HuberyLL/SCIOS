@@ -111,6 +111,17 @@ export interface BriefData {
   created_at: string;
 }
 
+export interface DeleteMonitorTaskData {
+  id: string;
+  deleted: boolean;
+}
+
+export type MonitoringSSEEvent =
+  | { type: "task_started"; task_id: string; topic: string; at: string }
+  | { type: "task_completed"; task_id: string; topic: string; at: string }
+  | { type: "task_failed"; task_id: string; topic: string; at: string }
+  | { type: "ping" };
+
 // ---------------------------------------------------------------------------
 // SSE event discriminated union — mirrors backend SSE `data:` payloads
 // ---------------------------------------------------------------------------

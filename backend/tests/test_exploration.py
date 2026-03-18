@@ -13,6 +13,7 @@ from src.agents.exploration.schemas import (
     ExplorationReport,
     RawRetrievedData,
     RecommendedPaper,
+    RoutedSources,
     ScholarProfile,
     SearchPlan,
     TrendsAndChallenges,
@@ -32,6 +33,15 @@ FAKE_SEARCH_PLAN = SearchPlan(
     paper_keywords=["transformer healthcare", "clinical NLP"],
     web_queries=["latest trends in medical AI"],
     focus_areas=["clinical NLP", "medical imaging"],
+    source_hints=["arxiv", "pubmed"],
+    domain_tags=["biomedical", "computer_science"],
+    confidence=0.85,
+)
+
+FAKE_ROUTED = RoutedSources(
+    primary=["arxiv", "pubmed"],
+    secondary=["biorxiv", "medrxiv"],
+    reason="test routing",
 )
 
 
@@ -244,7 +254,9 @@ class TestRetrieverFetchAll:
 
         from src.agents.exploration.retriever import fetch_all_context
 
-        result = await fetch_all_context(FAKE_SEARCH_PLAN)
+        result = await fetch_all_context(
+            FAKE_SEARCH_PLAN, FAKE_ROUTED, stage_b_enabled=False,
+        )
 
         assert isinstance(result, RawRetrievedData)
         assert len(result.s2_results) == len(FAKE_SEARCH_PLAN.paper_keywords)
@@ -276,7 +288,7 @@ class TestRetrieverFetchAll:
 
         from src.agents.exploration.retriever import fetch_all_context
 
-        result = await fetch_all_context(FAKE_SEARCH_PLAN)
+        result = await fetch_all_context(FAKE_SEARCH_PLAN, FAKE_ROUTED)
 
         assert isinstance(result, RawRetrievedData)
         for sr in result.s2_results:
@@ -285,6 +297,119 @@ class TestRetrieverFetchAll:
             assert sr.papers == []
         for wr in result.web_results:
             assert wr.results == []
+
+    async def test_stage_b_triggers_when_few_papers(self, mocker):
+        """Stage B should add secondary sources when Stage A yields too few papers."""
+        mocker.patch(
+            "src.agents.exploration.retriever.SemanticScholarClient"
+        ).return_value = self._mock_s2_client(mocker)
+
+        searcher_mock = mocker.AsyncMock()
+        call_count = {"n": 0}
+
+        async def _mock_search(query, *, sources=None, max_results=10):
+            call_count["n"] += 1
+            if call_count["n"] <= len(FAKE_SEARCH_PLAN.paper_keywords):
+                return SearchResult(query=query, papers=[])
+            return FAKE_ARXIV_RESULT
+
+        searcher_mock.search = _mock_search
+        mocker.patch(
+            "src.agents.exploration.retriever.PaperSearcher"
+        ).return_value = searcher_mock
+
+        mocker.patch(
+            "src.agents.exploration.retriever.tavily_search",
+            side_effect=self._mock_tavily,
+        )
+
+        from src.agents.exploration.retriever import fetch_all_context
+
+        routed = RoutedSources(
+            primary=["arxiv"],
+            secondary=["pubmed", "crossref"],
+            reason="test",
+        )
+        result = await fetch_all_context(
+            FAKE_SEARCH_PLAN, routed, min_papers_stage_b=1,
+        )
+
+        assert len(result.paper_results) > len(FAKE_SEARCH_PLAN.paper_keywords)
+
+    async def test_stage_b_skipped_when_disabled(self, mocker):
+        """Stage B should not trigger when stage_b_enabled=False."""
+        mocker.patch(
+            "src.agents.exploration.retriever.SemanticScholarClient"
+        ).return_value = self._mock_s2_client(mocker)
+
+        searcher_mock = mocker.AsyncMock()
+        searcher_mock.search = mocker.AsyncMock(
+            return_value=SearchResult(query="q", papers=[])
+        )
+        mocker.patch(
+            "src.agents.exploration.retriever.PaperSearcher"
+        ).return_value = searcher_mock
+
+        mocker.patch(
+            "src.agents.exploration.retriever.tavily_search",
+            side_effect=self._mock_tavily,
+        )
+
+        from src.agents.exploration.retriever import fetch_all_context
+
+        routed = RoutedSources(
+            primary=["arxiv"], secondary=["pubmed"], reason="test",
+        )
+        result = await fetch_all_context(
+            FAKE_SEARCH_PLAN, routed, stage_b_enabled=False,
+        )
+
+        assert len(result.paper_results) == len(FAKE_SEARCH_PLAN.paper_keywords)
+
+    async def test_stage_b_uses_deduped_count(self, mocker):
+        """Stage B should trigger when raw count looks sufficient but unique count is low.
+
+        Two keywords each return the same 3 papers -> raw total = 6 but unique = 3.
+        With min_papers_stage_b=4, Stage B should trigger because 3 < 4.
+        """
+        mocker.patch(
+            "src.agents.exploration.retriever.SemanticScholarClient"
+        ).return_value = self._mock_s2_client(mocker)
+
+        shared_papers = [
+            _make_paper("dup-a", "Shared Paper A", citations=10),
+            _make_paper("dup-b", "Shared Paper B", citations=20),
+            _make_paper("dup-c", "Shared Paper C", citations=30),
+        ]
+        searcher_mock = mocker.AsyncMock()
+        call_count = {"n": 0}
+
+        async def _mock_search(query, *, sources=None, max_results=10):
+            call_count["n"] += 1
+            if call_count["n"] <= len(FAKE_SEARCH_PLAN.paper_keywords):
+                return SearchResult(query=query, papers=list(shared_papers))
+            return FAKE_ARXIV_RESULT
+
+        searcher_mock.search = _mock_search
+        mocker.patch(
+            "src.agents.exploration.retriever.PaperSearcher"
+        ).return_value = searcher_mock
+
+        mocker.patch(
+            "src.agents.exploration.retriever.tavily_search",
+            side_effect=self._mock_tavily,
+        )
+
+        from src.agents.exploration.retriever import fetch_all_context
+
+        routed = RoutedSources(
+            primary=["arxiv"], secondary=["pubmed"], reason="test",
+        )
+        result = await fetch_all_context(
+            FAKE_SEARCH_PLAN, routed, min_papers_stage_b=4,
+        )
+
+        assert len(result.paper_results) > len(FAKE_SEARCH_PLAN.paper_keywords)
 
     # -- helper mocks --
 
@@ -363,18 +488,66 @@ class TestFormatContext:
         # The abstract portion should be truncated
         assert "x" * (MAX_ABSTRACT_CHARS + 1) not in text
 
+    def test_max_papers_cap(self):
+        from src.agents.exploration.synthesizer import _format_context
+
+        papers = [_make_paper(f"p-{i}", f"Paper {i}", citations=i) for i in range(50)]
+        raw = RawRetrievedData(
+            s2_results=[SearchResult(query="q", papers=papers)],
+        )
+        text = _format_context(raw, max_papers=10)
+        assert text.count("[P") == 10
+        assert "40 more papers omitted" in text
+
+    def test_papers_sorted_by_citations(self):
+        from src.agents.exploration.synthesizer import _format_context
+
+        papers = [
+            _make_paper("low", "Low Cited", citations=5),
+            _make_paper("high", "High Cited", citations=999),
+            _make_paper("mid", "Mid Cited", citations=100),
+        ]
+        raw = RawRetrievedData(
+            s2_results=[SearchResult(query="q", papers=papers)],
+        )
+        text = _format_context(raw)
+        high_pos = text.index("High Cited")
+        mid_pos = text.index("Mid Cited")
+        low_pos = text.index("Low Cited")
+        assert high_pos < mid_pos < low_pos
+
 
 # ===================================================================
 # Test 4: Pipeline end-to-end (all mocked)
 # ===================================================================
 
 class TestPipeline:
-    """run_exploration() should chain planner → retriever → synthesizer."""
+    """run_exploration() should chain planner → router → retriever → synthesizer."""
+
+    def _patch_settings(self, mocker):
+        """Provide a fake Settings object so pipeline doesn't need a .env file."""
+        fake_cfg = mocker.MagicMock()
+        fake_cfg.source_routing_enabled = True
+        fake_cfg.source_routing_confidence_threshold = 0.6
+        fake_cfg.source_routing_max_sources = 4
+        fake_cfg.source_routing_stage_b_enabled = True
+        fake_cfg.source_routing_min_papers_stage_b = 5
+        fake_cfg.synthesizer_max_papers = 40
+        mocker.patch(
+            "src.agents.exploration.pipeline.get_settings",
+            return_value=fake_cfg,
+        )
+        return fake_cfg
 
     async def test_end_to_end(self, mocker):
+        self._patch_settings(mocker)
         mocker.patch(
             "src.agents.exploration.pipeline.generate_search_plan",
             return_value=FAKE_SEARCH_PLAN,
+        )
+        mocker.patch(
+            "src.agents.exploration.pipeline.route_sources",
+            return_value=FAKE_ROUTED,
         )
         mocker.patch(
             "src.agents.exploration.pipeline.fetch_all_context",
@@ -403,24 +576,33 @@ class TestPipeline:
         assert len(report.sources) >= 1
 
     async def test_calls_stages_in_order(self, mocker):
-        """Verify the three stages are called exactly once and in the right order."""
+        """Verify the four stages are called exactly once and in the right order."""
+        self._patch_settings(mocker)
         call_order: list[str] = []
 
         async def mock_planner(topic):
             call_order.append("planner")
             return FAKE_SEARCH_PLAN
 
-        async def mock_retriever(plan):
+        def mock_router(plan, **kwargs):
+            call_order.append("router")
+            return FAKE_ROUTED
+
+        async def mock_retriever(plan, routed, **kwargs):
             call_order.append("retriever")
             return RawRetrievedData()
 
-        async def mock_synthesizer(topic, raw_data):
+        async def mock_synthesizer(topic, raw_data, **kwargs):
             call_order.append("synthesizer")
             return FAKE_REPORT
 
         mocker.patch(
             "src.agents.exploration.pipeline.generate_search_plan",
             side_effect=mock_planner,
+        )
+        mocker.patch(
+            "src.agents.exploration.pipeline.route_sources",
+            side_effect=mock_router,
         )
         mocker.patch(
             "src.agents.exploration.pipeline.fetch_all_context",
@@ -435,19 +617,29 @@ class TestPipeline:
 
         await run_exploration("any topic")
 
-        assert call_order == ["planner", "retriever", "synthesizer"]
+        assert call_order == ["planner", "router", "retriever", "synthesizer"]
 
-    async def test_planner_output_feeds_retriever(self, mocker):
-        """Verify that the SearchPlan from the planner is passed to the retriever."""
-        captured_plan = {}
+    async def test_planner_output_feeds_router_and_retriever(self, mocker):
+        """Verify SearchPlan flows through router to retriever."""
+        self._patch_settings(mocker)
+        captured: dict = {}
 
-        async def mock_retriever(plan):
-            captured_plan["plan"] = plan
+        def mock_router(plan, **kwargs):
+            captured["router_plan"] = plan
+            return FAKE_ROUTED
+
+        async def mock_retriever(plan, routed, **kwargs):
+            captured["retriever_plan"] = plan
+            captured["retriever_routed"] = routed
             return RawRetrievedData()
 
         mocker.patch(
             "src.agents.exploration.pipeline.generate_search_plan",
             return_value=FAKE_SEARCH_PLAN,
+        )
+        mocker.patch(
+            "src.agents.exploration.pipeline.route_sources",
+            side_effect=mock_router,
         )
         mocker.patch(
             "src.agents.exploration.pipeline.fetch_all_context",
@@ -462,4 +654,6 @@ class TestPipeline:
 
         await run_exploration("test topic")
 
-        assert captured_plan["plan"] is FAKE_SEARCH_PLAN
+        assert captured["router_plan"] is FAKE_SEARCH_PLAN
+        assert captured["retriever_plan"] is FAKE_SEARCH_PLAN
+        assert captured["retriever_routed"] is FAKE_ROUTED
