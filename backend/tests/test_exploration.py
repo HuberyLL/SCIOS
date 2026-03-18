@@ -248,7 +248,7 @@ class TestRetrieverFetchAll:
 
         assert isinstance(result, RawRetrievedData)
         assert len(result.s2_results) == len(FAKE_SEARCH_PLAN.paper_keywords)
-        assert len(result.arxiv_results) == len(FAKE_SEARCH_PLAN.paper_keywords)
+        assert len(result.paper_results) == len(FAKE_SEARCH_PLAN.paper_keywords)
         assert len(result.web_results) == len(FAKE_SEARCH_PLAN.web_queries)
 
         total_s2_papers = sum(len(sr.papers) for sr in result.s2_results)
@@ -281,7 +281,7 @@ class TestRetrieverFetchAll:
         assert isinstance(result, RawRetrievedData)
         for sr in result.s2_results:
             assert sr.papers == []
-        for sr in result.arxiv_results:
+        for sr in result.paper_results:
             assert sr.papers == []
         for wr in result.web_results:
             assert wr.results == []
@@ -318,7 +318,7 @@ class TestFormatContext:
 
         raw = RawRetrievedData(
             s2_results=[FAKE_S2_RESULT],
-            arxiv_results=[FAKE_ARXIV_RESULT],
+            paper_results=[FAKE_ARXIV_RESULT],
             web_results=[FAKE_WEB_RESULT],
             citation_map={"s2-1": FAKE_CITATION_PAPERS},
         )
@@ -338,7 +338,7 @@ class TestFormatContext:
         same_paper = _make_paper("dup-1", "Same Title")
         raw = RawRetrievedData(
             s2_results=[SearchResult(query="q", papers=[same_paper])],
-            arxiv_results=[SearchResult(query="q", papers=[same_paper])],
+            paper_results=[SearchResult(query="q", papers=[same_paper])],
         )
         text = _format_context(raw)
         assert text.count("[P") == 1
@@ -380,7 +380,7 @@ class TestPipeline:
             "src.agents.exploration.pipeline.fetch_all_context",
             return_value=RawRetrievedData(
                 s2_results=[FAKE_S2_RESULT],
-                arxiv_results=[FAKE_ARXIV_RESULT],
+                paper_results=[FAKE_ARXIV_RESULT],
                 web_results=[FAKE_WEB_RESULT],
                 citation_map={},
             ),

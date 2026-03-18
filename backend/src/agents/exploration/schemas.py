@@ -39,7 +39,7 @@ class RawRetrievedData(BaseModel):
     """Aggregated raw data returned by the Retriever stage."""
 
     s2_results: list[SearchResult] = Field(default_factory=list)
-    arxiv_results: list[SearchResult] = Field(default_factory=list)
+    paper_results: list[SearchResult] = Field(default_factory=list)
     web_results: list[WebSearchResult] = Field(default_factory=list)
     citation_map: dict[str, list[PaperResult]] = Field(
         default_factory=dict,

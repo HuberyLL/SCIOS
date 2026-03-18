@@ -1,213 +1,29 @@
-"""Multi-source paper fetcher with graceful degradation.
+"""Multi-source paper search aggregator with graceful degradation.
 
-Supports arXiv and PubMed.  Each source implements ``BasePaperFetcher``;
-the ``PaperSearcher`` facade fans out queries and merges results.
+The ``PaperSearcher`` facade fans out queries to registered sources,
+merges results and deduplicates by DOI → canonical URL → normalized title+year.
 """
 
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
-from abc import ABC, abstractmethod
-from datetime import datetime
+import re
 from typing import Any, Sequence
-from xml.etree import ElementTree as ET
+from urllib.parse import urlparse
 
-import feedparser
-import httpx
-from pypdf import PdfReader
-
-from ._http import managed_client
 from ._schemas import PaperResult, SearchResult
+from .sources import DEFAULT_SOURCES, SOURCE_REGISTRY
+from .sources._base import BasePaperFetcher, extract_year, normalize_title
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Abstract base
-# ---------------------------------------------------------------------------
-
-class BasePaperFetcher(ABC):
-    """Contract that every paper source must satisfy."""
-
-    source_name: str = ""
-
-    @abstractmethod
-    async def search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
-        ...
-
-    @abstractmethod
-    async def fetch_full_text(self, paper: PaperResult) -> str:
-        """Return extracted full text.  On failure, return the abstract."""
-        ...
-
-
-# ---------------------------------------------------------------------------
-# arXiv
-# ---------------------------------------------------------------------------
-
-class ArxivFetcher(BasePaperFetcher):
-    """Fetch papers from the arXiv Atom feed API."""
-
-    source_name = "arxiv"
-    _API_URL = "https://export.arxiv.org/api/query"
-
-    async def search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
-        params = {
-            "search_query": query,
-            "max_results": max_results,
-            "sortBy": "submittedDate",
-            "sortOrder": "descending",
-        }
-        try:
-            async with managed_client() as client:
-                resp = await client.get(self._API_URL, params=params)
-                resp.raise_for_status()
-                raw = resp.text
-        except Exception as exc:
-            logger.error("arXiv search failed: %s", exc)
-            return []
-
-        feed = feedparser.parse(raw)
-        papers: list[PaperResult] = []
-        for entry in feed.entries:
-            try:
-                authors = [a.name for a in getattr(entry, "authors", [])]
-                pdf_url = next(
-                    (lnk.href for lnk in entry.links if getattr(lnk, "type", "") == "application/pdf"),
-                    "",
-                )
-                published = _parse_iso(entry.get("published", ""))
-                papers.append(PaperResult(
-                    paper_id=entry.id.split("/")[-1],
-                    title=entry.title.strip().replace("\n", " "),
-                    authors=authors,
-                    abstract=(entry.summary or "").strip(),
-                    doi=entry.get("doi", ""),
-                    published_date=published,
-                    pdf_url=pdf_url,
-                    url=entry.id,
-                    source=self.source_name,
-                    categories=[t.term for t in getattr(entry, "tags", [])],
-                ))
-            except Exception as exc:
-                logger.warning("arXiv entry parse error: %s", exc)
-        return papers
-
-    async def fetch_full_text(self, paper: PaperResult) -> str:
-        """Download PDF into memory and extract text; fall back to abstract."""
-        if not paper.pdf_url:
-            return paper.abstract
-
-        try:
-            async with managed_client(timeout=60.0) as client:
-                resp = await client.get(paper.pdf_url)
-                resp.raise_for_status()
-                reader = PdfReader(io.BytesIO(resp.content))
-                pages = [page.extract_text() or "" for page in reader.pages]
-                text = "\n".join(pages).strip()
-                if text:
-                    return text
-        except Exception as exc:
-            logger.warning("arXiv PDF extraction failed for %s, using abstract: %s", paper.paper_id, exc)
-
-        return paper.abstract
-
-
-# ---------------------------------------------------------------------------
-# PubMed
-# ---------------------------------------------------------------------------
-
-class PubMedFetcher(BasePaperFetcher):
-    """Fetch papers from NCBI PubMed E-utilities."""
-
-    source_name = "pubmed"
-    _SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-    _FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-    _sem = asyncio.Semaphore(2)
-    _MIN_INTERVAL = 0.4
-
-    async def search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
-        async with self._sem:
-            await asyncio.sleep(self._MIN_INTERVAL)
-            return await self._do_search(query, max_results=max_results)
-
-    async def _do_search(self, query: str, *, max_results: int = 10) -> list[PaperResult]:
-        try:
-            async with managed_client() as client:
-                search_resp = await client.get(
-                    self._SEARCH_URL,
-                    params={"db": "pubmed", "term": query, "retmax": max_results, "retmode": "xml"},
-                )
-                search_resp.raise_for_status()
-                ids = [el.text for el in ET.fromstring(search_resp.text).findall(".//Id") if el.text]
-                if not ids:
-                    return []
-
-                fetch_resp = await client.get(
-                    self._FETCH_URL,
-                    params={"db": "pubmed", "id": ",".join(ids), "retmode": "xml"},
-                )
-                fetch_resp.raise_for_status()
-        except Exception as exc:
-            logger.warning("PubMed search failed: %s", exc)
-            return []
-
-        return self._parse_articles(fetch_resp.text)
-
-    async def fetch_full_text(self, paper: PaperResult) -> str:
-        """PubMed doesn't offer free PDF access; return the abstract."""
-        return paper.abstract
-
-    # -- helpers --
-
-    @staticmethod
-    def _parse_articles(xml_text: str) -> list[PaperResult]:
-        root = ET.fromstring(xml_text)
-        papers: list[PaperResult] = []
-        for article in root.findall(".//PubmedArticle"):
-            try:
-                pmid = _xml_text(article, ".//PMID")
-                title = _xml_text(article, ".//ArticleTitle")
-                abstract = _xml_text(article, ".//AbstractText")
-                pub_year = _xml_text(article, ".//PubDate/Year")
-                doi_el = article.find('.//ELocationID[@EIdType="doi"]')
-                doi = doi_el.text if doi_el is not None and doi_el.text else ""
-
-                authors: list[str] = []
-                for au in article.findall(".//Author"):
-                    last = _xml_text(au, "LastName")
-                    initials = _xml_text(au, "Initials")
-                    if last:
-                        authors.append(f"{last} {initials}".strip())
-
-                papers.append(PaperResult(
-                    paper_id=pmid,
-                    title=title,
-                    authors=authors,
-                    abstract=abstract,
-                    doi=doi,
-                    published_date=pub_year,
-                    url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
-                    source="pubmed",
-                ))
-            except Exception as exc:
-                logger.warning("PubMed article parse error: %s", exc)
-        return papers
-
-
-# ---------------------------------------------------------------------------
-# Aggregator
-# ---------------------------------------------------------------------------
-
 class PaperSearcher:
     """Fan-out search across multiple sources, merge and deduplicate."""
 
-    _FETCHERS: dict[str, BasePaperFetcher] = {
-        "arxiv": ArxivFetcher(),
-        "pubmed": PubMedFetcher(),
-    }
+    def __init__(self, fetchers: dict[str, BasePaperFetcher] | None = None) -> None:
+        self._fetchers = fetchers if fetchers is not None else SOURCE_REGISTRY
 
     async def search(
         self,
@@ -216,16 +32,16 @@ class PaperSearcher:
         sources: Sequence[str] | None = None,
         max_results: int = 10,
     ) -> SearchResult:
-        """Search selected (or all) sources concurrently.
+        """Search selected (or default) sources concurrently.
 
-        Failures in individual sources are swallowed — partial results are
+        Failures in individual sources are swallowed -- partial results are
         better than no results.
         """
-        chosen = sources or list(self._FETCHERS.keys())
+        chosen = sources or DEFAULT_SOURCES
         tasks = [
             self._safe_search(name, query, max_results)
             for name in chosen
-            if name in self._FETCHERS
+            if name in self._fetchers
         ]
         nested = await asyncio.gather(*tasks)
         papers = _deduplicate(p for batch in nested for p in batch)
@@ -233,7 +49,7 @@ class PaperSearcher:
 
     async def fetch_full_text(self, paper: PaperResult) -> str:
         """Route to the correct fetcher and return full text (or abstract)."""
-        fetcher = self._FETCHERS.get(paper.source)
+        fetcher = self._fetchers.get(paper.source)
         if fetcher is None:
             logger.warning("No fetcher for source '%s'; returning abstract", paper.source)
             return paper.abstract
@@ -243,48 +59,61 @@ class PaperSearcher:
             logger.error("fetch_full_text failed for %s: %s", paper.paper_id, exc)
             return paper.abstract
 
-    # -- internal --
-
     async def _safe_search(self, name: str, query: str, max_results: int) -> list[PaperResult]:
         try:
-            return await self._FETCHERS[name].search(query, max_results=max_results)
+            return await self._fetchers[name].search(query, max_results=max_results)
         except Exception as exc:
             logger.error("Source '%s' search failed: %s", name, exc)
             return []
 
 
 # ---------------------------------------------------------------------------
-# Utilities
+# Three-level deduplication
 # ---------------------------------------------------------------------------
 
-def _xml_text(root: Any, xpath: str) -> str:
-    el = root.find(xpath)
-    return (el.text or "").strip() if el is not None else ""
+_URL_STRIP_RE = re.compile(r"^https?://(www\.)?")
 
 
-def _parse_iso(date_str: str) -> str:
-    """Best-effort ISO-date extraction; return raw string on failure."""
-    if not date_str:
+def _canonical_url(url: str) -> str:
+    """Normalize URL for dedup: strip scheme, www, trailing slash."""
+    if not url:
         return ""
-    try:
-        return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d")
-    except ValueError:
-        return date_str
+    normed = _URL_STRIP_RE.sub("", url).rstrip("/").lower()
+    return normed
 
 
 def _deduplicate(papers: Any) -> list[PaperResult]:
-    """Remove duplicates by DOI (preferred) or title lower-case."""
+    """Remove duplicates using a three-level strategy:
+
+    1. DOI exact match
+    2. Canonical URL match
+    3. Normalized title + publication year
+    """
     seen_doi: set[str] = set()
-    seen_title: set[str] = set()
+    seen_url: set[str] = set()
+    seen_title_year: set[str] = set()
     unique: list[PaperResult] = []
+
     for p in papers:
         if p.doi:
-            if p.doi in seen_doi:
+            doi_key = p.doi.lower().strip()
+            if doi_key in seen_doi:
                 continue
-            seen_doi.add(p.doi)
-        key = p.title.lower().strip()
-        if key in seen_title:
+            seen_doi.add(doi_key)
+
+        if p.url:
+            url_key = _canonical_url(p.url)
+            if url_key and url_key in seen_url:
+                continue
+            if url_key:
+                seen_url.add(url_key)
+
+        norm_title = normalize_title(p.title)
+        year = extract_year(p.published_date)
+        title_year_key = f"{norm_title}|{year}" if year else norm_title
+        if title_year_key in seen_title_year:
             continue
-        seen_title.add(key)
+        seen_title_year.add(title_year_key)
+
         unique.append(p)
     return unique

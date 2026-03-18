@@ -10,11 +10,11 @@ import respx
 
 from src.agents.tools._schemas import PaperResult
 from src.agents.tools.paper_fetcher import (
-    ArxivFetcher,
     PaperSearcher,
-    PubMedFetcher,
     _deduplicate,
 )
+from src.agents.tools.sources.arxiv import ArxivFetcher
+from src.agents.tools.sources.pubmed import PubMedFetcher
 
 
 def _make_paper(**overrides) -> PaperResult:
@@ -42,8 +42,11 @@ async def test_t8_partial_source_failure(monkeypatch):
     monkeypatch.setattr(ArxivFetcher, "search", arxiv_search)
     monkeypatch.setattr(PubMedFetcher, "search", pubmed_search)
 
-    searcher = PaperSearcher()
-    result = await searcher.search("test query")
+    searcher = PaperSearcher(fetchers={
+        "arxiv": ArxivFetcher(),
+        "pubmed": PubMedFetcher(),
+    })
+    result = await searcher.search("test query", sources=["arxiv", "pubmed"])
 
     assert len(result.papers) == 2
     assert all(p.source == "arxiv" for p in result.papers)
@@ -78,24 +81,45 @@ async def test_t9_no_pdf_url_returns_abstract():
 
 
 # ------------------------------------------------------------------
-# T10: Deduplication logic
+# T10: Deduplication logic (three-level)
 # ------------------------------------------------------------------
 
-def test_t10_dedup_by_doi_and_title():
-    p1 = _make_paper(paper_id="1", doi="10.1/a", title="Paper A", source="arxiv")
-    p2 = _make_paper(paper_id="2", doi="10.1/a", title="Paper A from PubMed", source="pubmed")
-    p3 = _make_paper(paper_id="3", doi="", title="Paper B", source="arxiv")
-    p4 = _make_paper(paper_id="4", doi="", title="paper b", source="pubmed")
+def test_t10_dedup_by_doi():
+    p1 = _make_paper(paper_id="1", doi="10.1/a", title="Paper A", source="arxiv", url="https://a.com/1")
+    p2 = _make_paper(paper_id="2", doi="10.1/a", title="Paper A from PubMed", source="pubmed", url="https://b.com/2")
 
-    result = _deduplicate([p1, p2, p3, p4])
-
-    assert len(result) == 2
+    result = _deduplicate([p1, p2])
+    assert len(result) == 1
     assert result[0].paper_id == "1"
-    assert result[1].paper_id == "3"
+
+
+def test_t10_dedup_by_url():
+    p1 = _make_paper(paper_id="1", doi="", title="Paper A", url="https://example.com/paper/1")
+    p2 = _make_paper(paper_id="2", doi="", title="Different Title", url="https://example.com/paper/1")
+
+    result = _deduplicate([p1, p2])
+    assert len(result) == 1
+
+
+def test_t10_dedup_by_title_year():
+    p1 = _make_paper(paper_id="1", doi="", title="Paper B", source="arxiv", url="https://a.com", published_date="2024-01-01")
+    p2 = _make_paper(paper_id="2", doi="", title="paper b", source="pubmed", url="https://b.com", published_date="2024-06-15")
+
+    result = _deduplicate([p1, p2])
+    assert len(result) == 1
+    assert result[0].paper_id == "1"
 
 
 def test_t10_dedup_empty_input():
     assert _deduplicate([]) == []
+
+
+def test_t10_different_years_kept():
+    p1 = _make_paper(paper_id="1", doi="", title="Paper C", url="https://a.com", published_date="2023-01-01")
+    p2 = _make_paper(paper_id="2", doi="", title="Paper C", url="https://b.com", published_date="2024-01-01")
+
+    result = _deduplicate([p1, p2])
+    assert len(result) == 2
 
 
 # ------------------------------------------------------------------

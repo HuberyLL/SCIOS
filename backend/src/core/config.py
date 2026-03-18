@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     monitoring_cron_minute: int = 0
     monitoring_interval_minutes: int | None = None
 
+    # -- Multi-source paper search ------------------------------------------
+    core_api_key: str = ""
+    unpaywall_email: str = ""
+    doaj_api_key: str = ""
+    crossref_mailto: str = ""
+    openalex_mailto: str = ""
+
     # -- Email notification (SMTP) ------------------------------------------
     smtp_server: str = ""
     smtp_port: int = 465

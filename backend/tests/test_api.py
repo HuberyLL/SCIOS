@@ -289,7 +289,7 @@ class TestStreamEndpoint:
         assert resp.status_code == 404
 
     async def test_completed_task_sends_final_event(self, client, mocker):
-        """A completed task should immediately yield one event and close."""
+        """A completed task should end with a complete event (snapshot + final)."""
         mocker.patch(
             "src.services.task_manager.run_exploration",
             new_callable=AsyncMock,
@@ -304,9 +304,10 @@ class TestStreamEndpoint:
         resp = await client.get(f"/api/v1/exploration/{task_id}/stream")
         assert resp.headers["content-type"] == "text/event-stream; charset=utf-8"
         events = _parse_sse_events(resp.text)
-        assert len(events) == 1
-        assert events[0]["type"] == "complete"
-        assert events[0]["status"] == "completed"
+        assert len(events) >= 1
+        assert events[-1]["type"] == "complete"
+        assert events[-1]["status"] == "completed"
+        assert any(e.get("type") == "status" and e.get("status") == "completed" for e in events)
 
     async def test_failed_task_sends_error_event(self, client, mocker):
         mocker.patch(
@@ -322,9 +323,10 @@ class TestStreamEndpoint:
 
         resp = await client.get(f"/api/v1/exploration/{task_id}/stream")
         events = _parse_sse_events(resp.text)
-        assert len(events) == 1
-        assert events[0]["type"] == "error"
-        assert events[0]["status"] == "failed"
+        assert len(events) >= 1
+        assert events[-1]["type"] == "error"
+        assert events[-1]["status"] == "failed"
+        assert any(e.get("type") == "status" and e.get("status") == "failed" for e in events)
 
     async def test_live_events_streamed_to_client(self, client):
         """Simulate a running task pushing events via the pub/sub bus."""
@@ -354,7 +356,8 @@ class TestStreamEndpoint:
 
         await publisher
 
-        assert len(collected) == 3
-        assert collected[0] == {"type": "progress", "message": "Planning"}
-        assert collected[1] == {"type": "progress", "message": "Retrieving"}
-        assert collected[2]["type"] == "complete"
+        assert len(collected) >= 3
+        assert collected[-1]["type"] == "complete"
+        progress_messages = [e.get("message") for e in collected if e.get("type") == "progress"]
+        assert "Planning" in progress_messages
+        assert "Retrieving" in progress_messages

@@ -22,7 +22,7 @@ def _format_context(raw: RawRetrievedData) -> str:
     sections: list[str] = []
 
     all_papers = []
-    for sr in (*raw.s2_results, *raw.arxiv_results):
+    for sr in (*raw.s2_results, *raw.paper_results):
         for p in sr.papers:
             all_papers.append(p)
 

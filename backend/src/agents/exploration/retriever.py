@@ -11,12 +11,13 @@ import logging
 
 from ..tools import PaperSearcher, SemanticScholarClient, tavily_search
 from ..tools._schemas import PaperResult, SearchResult, WebSearchResult
+from ..tools.sources import DEFAULT_SOURCES
 from .schemas import RawRetrievedData, SearchPlan
 
 logger = logging.getLogger(__name__)
 
 S2_MAX_PER_KEYWORD = 10
-ARXIV_MAX_PER_KEYWORD = 10
+PAPER_MAX_PER_KEYWORD = 10
 TOP_N_FOR_CITATIONS = 3
 CITATION_LIMIT = 20
 
@@ -43,18 +44,18 @@ async def _search_s2(keywords: list[str]) -> list[SearchResult]:
     return out
 
 
-async def _search_arxiv(keywords: list[str]) -> list[SearchResult]:
-    """Search arXiv (+ PubMed) for each keyword concurrently."""
+async def _search_papers(keywords: list[str]) -> list[SearchResult]:
+    """Search multi-source papers for each keyword concurrently."""
     searcher = PaperSearcher()
     tasks = [
-        searcher.search(kw, max_results=ARXIV_MAX_PER_KEYWORD)
+        searcher.search(kw, sources=DEFAULT_SOURCES, max_results=PAPER_MAX_PER_KEYWORD)
         for kw in keywords
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     out: list[SearchResult] = []
     for kw, r in zip(keywords, results):
         if isinstance(r, Exception):
-            logger.warning("arXiv/PubMed search failed for '%s': %s", kw, r)
+            logger.warning("Multi-source paper search failed for '%s': %s", kw, r)
             out.append(SearchResult(query=kw))
         else:
             out.append(r)
@@ -128,15 +129,15 @@ async def fetch_all_context(plan: SearchPlan) -> RawRetrievedData:
     All external calls are concurrent; individual failures are logged and
     replaced with empty results so the pipeline always continues.
     """
-    s2_results, arxiv_results, web_results = await asyncio.gather(
+    s2_results, paper_results, web_results = await asyncio.gather(
         _search_s2(plan.paper_keywords),
-        _search_arxiv(plan.paper_keywords),
+        _search_papers(plan.paper_keywords),
         _search_web(plan.web_queries),
     )
 
     citation_map = await _fetch_citations(s2_results)
 
-    total_papers = sum(len(sr.papers) for sr in (*s2_results, *arxiv_results))
+    total_papers = sum(len(sr.papers) for sr in (*s2_results, *paper_results))
     total_web = sum(len(wr.results) for wr in web_results)
     logger.info(
         "Retriever  papers=%d  web_snippets=%d  citation_chains=%d",
@@ -147,7 +148,7 @@ async def fetch_all_context(plan: SearchPlan) -> RawRetrievedData:
 
     return RawRetrievedData(
         s2_results=s2_results,
-        arxiv_results=arxiv_results,
+        paper_results=paper_results,
         web_results=web_results,
         citation_map=citation_map,
     )
