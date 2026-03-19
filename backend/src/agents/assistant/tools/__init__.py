@@ -13,6 +13,7 @@ from src.agents.assistant.tools.fs_tools import (
     WriteFileTool,
 )
 from src.agents.assistant.tools.latex_tools import CompileLatexTool
+from src.agents.assistant.tools.memory_tool import UpdateMemoryTool
 from src.agents.assistant.tools.python_repl import RunPythonCodeTool
 from src.agents.assistant.tools.registry import ToolRegistry
 from src.agents.assistant.tools.shell_tool import RunBashCommandTool
@@ -28,3 +29,4 @@ ToolRegistry.register(SearchAcademicPapersTool())
 ToolRegistry.register(WebSearchTool())
 ToolRegistry.register(CompileLatexTool())
 ToolRegistry.register(ParseCSVLogTool())
+ToolRegistry.register(UpdateMemoryTool())

@@ -171,4 +171,4 @@ async def test_runner_auto_updates_default_session_title_on_first_user_message()
         saved = db.get(AssistantSession, session.id)
         assert saved is not None
         assert saved.title != "New Chat"
-        assert "image classification" in saved.title
+        assert saved.title.startswith("Write a small experiment script")

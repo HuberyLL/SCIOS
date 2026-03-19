@@ -10,13 +10,14 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
 
+import tiktoken
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from src.agents.assistant.tools.registry import ToolRegistry
 from src.core.config import get_settings
-from src.models.assistant import AssistantMessage, AssistantSession, MessageRole
+from src.models.assistant import AssistantMessage, AssistantSession, Memory, MessageRole
 from src.models.db import get_engine
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,181 @@ class AssistantRunner:
         )
         self.model = cfg.assistant_model or cfg.llm_model
         self.max_rounds = cfg.assistant_max_tool_rounds
+        self.max_context_tokens = cfg.assistant_max_context_tokens
+        self.max_memory_items = cfg.assistant_memory_max_items
+        self.max_memory_tokens = cfg.assistant_memory_max_tokens
         self.system_prompt = cfg.assistant_system_prompt or DEFAULT_SYSTEM_PROMPT
+
+        try:
+            self._encoder = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            self._encoder = tiktoken.get_encoding("cl100k_base")
+
+    # ------------------------------------------------------------------
+    # Long-term memory
+    # ------------------------------------------------------------------
+
+    def _load_memories(self) -> list[Memory]:
+        """Return all persisted memory facts, ordered by creation time."""
+        with Session(get_engine()) as db:
+            stmt = select(Memory).order_by(Memory.created_at)  # type: ignore[arg-type]
+            return list(db.exec(stmt).all())
+
+    def _build_system_prompt(self) -> str:
+        """Return the system prompt with long-term memories appended."""
+        memories = self._load_memories()
+        if not memories:
+            return self.system_prompt
+
+        # Keep memory prompt bounded to avoid consuming the full context window.
+        head = "\n\n## Known facts about the user (long-term memory):\n"
+        tail = "\n\nUse the update_memory tool to add new facts or delete outdated ones."
+        head_tokens = self._count_tokens(head)
+        tail_tokens = self._count_tokens(tail)
+        available_tokens = max(0, self.max_memory_tokens - head_tokens - tail_tokens)
+
+        selected: list[str] = []
+        used_tokens = 0
+        omitted = 0
+
+        # Prefer more recent memories first.
+        for m in reversed(memories):
+            if len(selected) >= self.max_memory_items:
+                omitted += 1
+                continue
+            line = f"- [id:{m.id[:8]}] ({m.category}) {m.content}"
+            line_tokens = self._count_tokens(line + "\n")
+            if used_tokens + line_tokens > available_tokens:
+                omitted += 1
+                continue
+            selected.append(line)
+            used_tokens += line_tokens
+
+        selected.reverse()
+        if omitted > 0:
+            selected.append(f"- ... ({omitted} older memory items omitted)")
+
+        if not selected:
+            return self.system_prompt
+
+        memory_block = head + "\n".join(selected) + tail
+        return self.system_prompt + memory_block
+
+    # ------------------------------------------------------------------
+    # Token counting & context trimming
+    # ------------------------------------------------------------------
+
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens using the tiktoken encoder for the current model."""
+        return len(self._encoder.encode(text))
+
+    def _count_msg_tokens(self, msg: dict[str, Any]) -> int:
+        """Estimate the token cost of a single OpenAI message dict."""
+        tokens = self._count_tokens(msg.get("content") or "")
+        if msg.get("tool_calls"):
+            tokens += self._count_tokens(
+                json.dumps(msg["tool_calls"], ensure_ascii=False)
+            )
+        tokens += 4  # per-message overhead (role, separators)
+        return tokens
+
+    @staticmethod
+    def _segment_history(history: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        """Split the flat message list into atomic groups.
+
+        An assistant message with ``tool_calls`` and its subsequent tool
+        responses form a single indivisible group.  Every other message is
+        its own group.
+        """
+        groups: list[list[dict[str, Any]]] = []
+        i = 0
+        while i < len(history):
+            msg = history[i]
+            if msg["role"] == "assistant" and msg.get("tool_calls"):
+                group = [msg]
+                i += 1
+                while i < len(history) and history[i]["role"] == "tool":
+                    group.append(history[i])
+                    i += 1
+                groups.append(group)
+            else:
+                groups.append([msg])
+                i += 1
+        return groups
+
+    def _truncate_text_to_tokens(self, text: str, max_tokens: int) -> str:
+        """Return text truncated to at most ``max_tokens`` tokens."""
+        if max_tokens <= 0 or not text:
+            return ""
+        ids = self._encoder.encode(text)
+        if len(ids) <= max_tokens:
+            return text
+        truncated = self._encoder.decode(ids[:max_tokens]).rstrip()
+        return truncated or ""
+
+    def _force_fit_group(
+        self, group: list[dict[str, Any]], remaining_budget: int
+    ) -> list[dict[str, Any]] | None:
+        """Try to force-fit the newest group into remaining budget.
+
+        Only supports a single non-tool message by truncating its content.
+        Tool-call groups remain atomic and are not partially trimmed.
+        """
+        if remaining_budget <= 0 or len(group) != 1:
+            return None
+
+        msg = group[0]
+        if msg.get("role") == "tool" or msg.get("tool_calls"):
+            return None
+
+        base_overhead = 4
+        available_for_content = remaining_budget - base_overhead
+        if available_for_content <= 0:
+            return None
+
+        original = msg.get("content") or ""
+        truncated = self._truncate_text_to_tokens(original, available_for_content)
+        if not truncated and original:
+            return None
+
+        forced = dict(msg)
+        forced["content"] = truncated
+        return [forced]
+
+    def _trim_history(
+        self, system_prompt_text: str, history: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Keep the most recent message groups that fit within the token budget.
+
+        The *system prompt* (which already includes long-term memories) is
+        protected and always sent — its token cost is subtracted from the
+        total budget first.
+        """
+        system_tokens = self._count_msg_tokens(
+            {"role": "system", "content": system_prompt_text}
+        )
+        budget = self.max_context_tokens - system_tokens
+        if budget <= 0:
+            return []
+
+        groups = self._segment_history(history)
+
+        kept: list[list[dict[str, Any]]] = []
+        used = 0
+        for idx, group in enumerate(reversed(groups)):
+            is_newest_group = idx == 0
+            group_tokens = sum(self._count_msg_tokens(m) for m in group)
+            if used + group_tokens > budget:
+                if is_newest_group:
+                    forced = self._force_fit_group(group, budget - used)
+                    if forced:
+                        kept.append(forced)
+                break
+            kept.append(group)
+            used += group_tokens
+
+        kept.reverse()
+        return [msg for group in kept for msg in group]
 
     # ------------------------------------------------------------------
     # Database helpers
@@ -147,8 +322,13 @@ class AssistantRunner:
         self._maybe_auto_set_session_title(user_input)
         self._save_message(MessageRole.user, content=user_input)
 
-        messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self._load_history())
+        system_content = self._build_system_prompt()
+        history = self._load_history()
+        trimmed = self._trim_history(system_content, history)
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_content}
+        ]
+        messages.extend(trimmed)
 
         tool_defs = ToolRegistry.get_all_tools_for_llm()
 

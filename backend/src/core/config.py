@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     assistant_model: str = ""
     assistant_system_prompt: str = ""
     assistant_max_tool_rounds: int = 10
+    assistant_max_context_tokens: int = 8000
+    assistant_memory_max_items: int = 20
+    assistant_memory_max_tokens: int = 1200
     assistant_workspace_dir: str = "workspace"
 
     # -- Synthesizer --------------------------------------------------------

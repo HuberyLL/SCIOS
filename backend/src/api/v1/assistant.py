@@ -14,7 +14,7 @@ from sqlmodel import Session, select
 
 from src.agents.assistant.runner import AssistantRunner
 from src.agents.assistant.tools.fs_sandbox import resolve_and_check_path
-from src.models.assistant import AssistantMessage, AssistantSession, MessageRole
+from src.models.assistant import AssistantMessage, AssistantSession, Memory, MessageRole
 from src.models.db import get_engine
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,23 @@ class SessionDetailOut(BaseModel):
 
 class SessionListOut(BaseModel):
     sessions: list[SessionOut]
+
+
+class MemoryOut(BaseModel):
+    id: str
+    content: str
+    category: str
+    created_at: str
+    updated_at: str
+
+
+class MemoryListOut(BaseModel):
+    memories: list[MemoryOut]
+
+
+class UpdateMemoryRequest(BaseModel):
+    content: str
+    category: str | None = None
 
 
 # ------------------------------------------------------------------
@@ -151,6 +168,62 @@ def delete_session(session_id: str) -> None:
         for m in msgs:
             db.delete(m)
         db.delete(session)
+        db.commit()
+
+
+# ------------------------------------------------------------------
+# REST: long-term memories CRUD
+# ------------------------------------------------------------------
+
+@router.get("/memories", response_model=MemoryListOut)
+def list_memories() -> MemoryListOut:
+    with Session(get_engine()) as db:
+        rows = db.exec(
+            select(Memory).order_by(Memory.created_at)  # type: ignore[arg-type]
+        ).all()
+    return MemoryListOut(
+        memories=[
+            MemoryOut(
+                id=m.id,
+                content=m.content,
+                category=m.category,
+                created_at=_iso_utc(m.created_at),
+                updated_at=_iso_utc(m.updated_at),
+            )
+            for m in rows
+        ]
+    )
+
+
+@router.put("/memories/{memory_id}", response_model=MemoryOut)
+def update_memory(memory_id: str, body: UpdateMemoryRequest) -> MemoryOut:
+    with Session(get_engine()) as db:
+        mem = db.get(Memory, memory_id)
+        if mem is None:
+            raise HTTPException(404, "Memory not found")
+        mem.content = body.content
+        if body.category is not None:
+            mem.category = body.category
+        mem.updated_at = datetime.now(timezone.utc)
+        db.add(mem)
+        db.commit()
+        db.refresh(mem)
+    return MemoryOut(
+        id=mem.id,
+        content=mem.content,
+        category=mem.category,
+        created_at=_iso_utc(mem.created_at),
+        updated_at=_iso_utc(mem.updated_at),
+    )
+
+
+@router.delete("/memories/{memory_id}", status_code=204)
+def delete_memory(memory_id: str) -> None:
+    with Session(get_engine()) as db:
+        mem = db.get(Memory, memory_id)
+        if mem is None:
+            raise HTTPException(404, "Memory not found")
+        db.delete(mem)
         db.commit()
 
 

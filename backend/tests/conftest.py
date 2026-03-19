@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, create_engine
 from tenacity import wait_none
 
@@ -36,6 +37,7 @@ def _test_db():
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     SQLModel.metadata.create_all(engine)
     _db_mod._engine = engine

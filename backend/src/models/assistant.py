@@ -28,6 +28,18 @@ class AssistantSession(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class Memory(SQLModel, table=True):
+    """A single long-term fact the assistant remembers across sessions."""
+
+    __tablename__ = "assistant_memories"
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    content: str
+    category: str = "general"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class AssistantMessage(SQLModel, table=True):
     __tablename__ = "assistant_messages"
 
