@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
+from src.api.v1.assistant import router as assistant_router
 from src.api.v1.exploration import router as exploration_router
 from src.api.v1.monitoring import router as monitoring_router
 from src.models.db import get_engine
@@ -29,6 +30,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
+    import src.agents.assistant.tools  # noqa: F401 — trigger tool registration
     start_scheduler()
     yield
     shutdown_scheduler()
@@ -50,3 +52,4 @@ app.add_middleware(
 
 app.include_router(exploration_router)
 app.include_router(monitoring_router)
+app.include_router(assistant_router)

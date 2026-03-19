@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { AppHeader } from "@/components/app-header";
 import { SearchHero } from "@/components/exploration/search-hero";
@@ -12,8 +13,15 @@ import type { ExplorationReport } from "@/types";
 
 type ExplorationPhase = "idle" | "loading" | "completed" | "failed";
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState("explore");
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab") || "explore";
+
+  const [activeTab, setActiveTab] = useState(tab);
+
+  useEffect(() => {
+    setActiveTab(tab);
+  }, [tab]);
 
   // Exploration state machine
   const [phase, setPhase] = useState<ExplorationPhase>("idle");
@@ -98,7 +106,7 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <AppHeader activeTab={activeTab} onTabChange={setActiveTab} />
+      <AppHeader />
 
       <main className="flex-1">
         <AnimatePresence mode="wait">
@@ -155,5 +163,13 @@ export default function Home() {
         </AnimatePresence>
       </main>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <HomeContent />
+    </Suspense>
   );
 }

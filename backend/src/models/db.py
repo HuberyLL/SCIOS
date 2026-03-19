@@ -13,6 +13,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlmodel import Column, Field, Session, SQLModel, create_engine
 
 from src.core.config import get_settings
+from src.models.assistant import AssistantMessage, AssistantSession  # noqa: F401
 
 _engine = None
 

@@ -132,3 +132,67 @@ export type SSEEvent =
   | { type: "complete"; status: "completed"; result?: ExplorationReport }
   | { type: "error"; status: "failed"; message?: string }
   | { type: "timeout"; message: string };
+
+// ---------------------------------------------------------------------------
+// Assistant domain — mirrors backend/src/models/assistant.py + API schemas
+// ---------------------------------------------------------------------------
+
+export interface AssistantSession {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssistantMessageOut {
+  id: string;
+  session_id: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_calls: Record<string, unknown>[] | null;
+  tool_call_id: string | null;
+  created_at: string;
+}
+
+export type ToolCallStatus = "running" | "completed" | "error";
+
+export interface ToolCallBlock {
+  tool_call_id: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  result?: string;
+  status: ToolCallStatus;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  tool_calls: ToolCallBlock[];
+  isStreaming?: boolean;
+}
+
+export type ArtifactType = "pdf" | "image" | "code" | "text" | "markdown";
+
+export interface Artifact {
+  type: ArtifactType;
+  path: string;
+  label: string;
+}
+
+export type AssistantWSEvent =
+  | { event: "text_delta"; data: { content: string } }
+  | {
+      event: "tool_call_start";
+      data: {
+        tool_name: string;
+        tool_call_id: string;
+        tool_args: Record<string, unknown>;
+      };
+    }
+  | {
+      event: "tool_call_result";
+      data: { tool_name: string; tool_call_id: string; result: string };
+    }
+  | { event: "message_complete"; data: { content: string } }
+  | { event: "error"; data: { message: string } };
