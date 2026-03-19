@@ -123,11 +123,19 @@ export function SessionSidebar({
           {!loading &&
             !error &&
             sessions.map((s) => (
-              <button
+              <div
                 key={s.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelectSession(s.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelectSession(s.id);
+                  }
+                }}
                 className={cn(
-                  "group flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
+                  "group flex w-full cursor-pointer items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
                   currentSessionId === s.id
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -148,7 +156,7 @@ export function SessionSidebar({
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
-              </button>
+              </div>
             ))}
 
           {!loading && !error && sessions.length === 0 && (

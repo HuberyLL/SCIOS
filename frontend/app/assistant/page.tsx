@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { SessionSidebar } from "@/components/assistant/session-sidebar";
 import { ChatContainer } from "@/components/assistant/chat-container";
@@ -12,7 +12,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 
-export default function AssistantPage() {
+function AssistantContent() {
   const [sessionId, setSessionId] = useState<string | null>(null);
 
   const {
@@ -81,5 +81,13 @@ export default function AssistantPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function AssistantPage() {
+  return (
+    <Suspense>
+      <AssistantContent />
+    </Suspense>
   );
 }
