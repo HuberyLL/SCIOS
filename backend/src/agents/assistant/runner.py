@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
@@ -21,9 +22,14 @@ from src.models.db import get_engine
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are a powerful AI research assistant called SCIOS."
-    "You can help users query information, execute tools, and answer academic questions."
-    "When you need to get real-time information, please use the available tools."
+    "You are SCIOS, an advanced AI academic research and coding assistant.\n"
+    "You have access to a local sandbox workspace and a suite of powerful tools, including file operations, a persistent bash shell, python REPL, LaTeX compilation, and academic literature search.\n\n"
+    "CRITICAL INSTRUCTIONS:\n"
+    "1. ACT IN THE WORKSPACE: Never just output code, LaTeX, or scripts as plain text in your chat response if the user asks you to write or modify a document. Instead, directly use `write_file` or `edit_file` to create or modify files in the workspace.\n"
+    "2. BUILD AND VERIFY: If you write or modify a LaTeX document (.tex), you MUST immediately compile it using the `compile_latex` tool or `bash_command`. If compilation fails, analyze the logs, fix the errors using `edit_file`, and recompile until successful.\n"
+    "3. EXPLORE BEFORE EDITING: If asked to modify an existing project, use `bash_command` (e.g., `ls -la`, `grep`) or `read_file` to understand the directory structure and file contents before making changes.\n"
+    "4. MULTI-STEP REASONING: Complex tasks (like writing a paper section) require multiple steps. Chain your tool calls logically: Search literature -> Read abstracts -> Modify .tex file -> Compile -> Fix errors.\n"
+    "5. CONCISE COMMUNICATION: Briefly state what you are doing. Avoid dumping large file contents or long compilation logs in the chat. The user can see the files in the workspace."
 )
 
 
@@ -97,6 +103,37 @@ class AssistantRunner:
             db.refresh(msg)
         return msg
 
+    @staticmethod
+    def _suggest_title_from_user_input(text: str) -> str:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        if not cleaned:
+            return "New Chat"
+        if len(cleaned) > 40:
+            return f"{cleaned[:37].rstrip()}..."
+        return cleaned
+
+    def _maybe_auto_set_session_title(self, user_input: str) -> None:
+        with Session(get_engine()) as db:
+            session = db.get(AssistantSession, self.session_id)
+            if session is None:
+                return
+            if session.title and session.title != "New Chat":
+                return
+
+            user_rows = db.exec(
+                select(AssistantMessage.id).where(
+                    AssistantMessage.session_id == self.session_id,
+                    AssistantMessage.role == MessageRole.user,
+                )
+            ).first()
+            if user_rows is not None:
+                return
+
+            session.title = self._suggest_title_from_user_input(user_input)
+            session.updated_at = datetime.now(timezone.utc)
+            db.add(session)
+            db.commit()
+
     # ------------------------------------------------------------------
     # Core Agent Loop
     # ------------------------------------------------------------------
@@ -107,6 +144,7 @@ class AssistantRunner:
         until the LLM produces a final text reply or the round limit is
         reached."""
 
+        self._maybe_auto_set_session_title(user_input)
         self._save_message(MessageRole.user, content=user_input)
 
         messages = [{"role": "system", "content": self.system_prompt}]

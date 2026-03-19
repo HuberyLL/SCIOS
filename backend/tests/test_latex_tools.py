@@ -51,16 +51,43 @@ class TestCompileLatexTool:
     async def test_pdflatex_not_installed(self, tool, tmp_path: Path, monkeypatch):
         (tmp_path / "paper.tex").write_text(r"\documentclass{article}\begin{document}Hi\end{document}")
 
-        async def _raise_fnf(*args, **kwargs):
-            raise FileNotFoundError("pdflatex")
-
         monkeypatch.setattr(
-            "src.agents.assistant.tools.latex_tools.asyncio.create_subprocess_exec",
-            _raise_fnf,
+            "src.agents.assistant.tools.latex_tools._resolve_pdflatex_executable",
+            lambda env: None,
         )
 
         result = await tool.execute(tex_file_path="paper.tex")
         assert "pdflatex is not installed" in result
+
+    @pytest.mark.asyncio
+    async def test_uses_resolved_pdflatex_binary(self, tool, tmp_path: Path, monkeypatch):
+        tex_file = tmp_path / "paper.tex"
+        tex_file.write_text(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+        mock_proc = AsyncMock()
+        mock_proc.wait = AsyncMock(return_value=0)
+        mock_proc.returncode = 0
+
+        seen_commands: list[str] = []
+
+        async def _fake_exec(*args, **kwargs):
+            seen_commands.append(args[0])
+            (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4 fake")
+            return mock_proc
+
+        monkeypatch.setattr(
+            "src.agents.assistant.tools.latex_tools._resolve_pdflatex_executable",
+            lambda env: "/custom/pdflatex",
+        )
+        monkeypatch.setattr(
+            "src.agents.assistant.tools.latex_tools.asyncio.create_subprocess_exec",
+            _fake_exec,
+        )
+
+        result = await tool.execute(tex_file_path="paper.tex")
+        assert "Success" in result
+        assert seen_commands
+        assert all(command == "/custom/pdflatex" for command in seen_commands)
 
     @pytest.mark.asyncio
     async def test_successful_compilation(self, tool, tmp_path: Path, monkeypatch):

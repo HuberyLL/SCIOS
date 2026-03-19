@@ -36,7 +36,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       </div>
 
       <div
-        className={cn("min-w-0 max-w-[85%] space-y-2", isUser && "text-right")}
+        className={cn("min-w-0 max-w-[85%] space-y-2", isUser && "flex flex-col items-end")}
       >
         {isUser ? (
           <div className="inline-block rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,17 @@ import {
   FileText,
   Image as ImageIcon,
   Code2,
+  Loader2,
 } from "lucide-react";
+import Image from "next/image";
 import type { Artifact } from "@/types";
 import { EmptyWorkspace } from "./empty-workspace";
+import { MarkdownRenderer } from "./markdown-renderer";
 import { cn } from "@/lib/utils";
+
+function workspaceUrl(path: string): string {
+  return `/api/v1/assistant/workspace/${path}`;
+}
 
 interface WorkspacePanelProps {
   artifact: Artifact | null;
@@ -45,10 +52,52 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   image: ImageIcon,
   code: Code2,
   text: FileText,
+  markdown: FileText,
 };
 
 export function WorkspacePanel({ artifact, onClose }: WorkspacePanelProps) {
   const [zoom, setZoom] = useState(1);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const needsFetch = artifact?.type === "code" || artifact?.type === "text" || artifact?.type === "markdown";
+  const [prevArtifactPath, setPrevArtifactPath] = useState<string | null>(null);
+  const currentPath = needsFetch && artifact ? artifact.path : null;
+
+  if (currentPath !== prevArtifactPath) {
+    setPrevArtifactPath(currentPath);
+    setFileContent(null);
+    setFileError(null);
+    setFileLoading(currentPath !== null);
+  }
+
+  useEffect(() => {
+    if (!artifact || !needsFetch) {
+      return;
+    }
+    let cancelled = false;
+    fetch(workspaceUrl(artifact.path))
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then((text) => {
+        if (!cancelled) {
+          setFileContent(text);
+          setFileLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setFileError(String(err));
+          setFileLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact, needsFetch]);
 
   const handleZoomIn = useCallback(
     () => setZoom((z) => Math.min(z + 0.25, 3)),
@@ -121,7 +170,7 @@ export function WorkspacePanel({ artifact, onClose }: WorkspacePanelProps) {
       <div className="flex-1 overflow-hidden">
         {artifact.type === "pdf" && (
           <iframe
-            src={`/api/v1/assistant/workspace/${artifact.path}`}
+            src={workspaceUrl(artifact.path)}
             className="h-full w-full border-0"
             title={artifact.label}
           />
@@ -130,12 +179,37 @@ export function WorkspacePanel({ artifact, onClose }: WorkspacePanelProps) {
         {artifact.type === "image" && (
           <ScrollArea className="h-full">
             <div className="flex items-center justify-center p-4">
-              <img
-                src={`/api/v1/assistant/workspace/${artifact.path}`}
+              <Image
+                src={workspaceUrl(artifact.path)}
                 alt={artifact.label}
-                className={cn("max-w-full rounded-md transition-transform")}
+                width={0}
+                height={0}
+                sizes="100vw"
+                className={cn("h-auto w-auto max-w-full rounded-md transition-transform")}
                 style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
+                unoptimized
               />
+            </div>
+          </ScrollArea>
+        )}
+
+        {artifact.type === "markdown" && (
+          <ScrollArea className="h-full">
+            <div className="p-4">
+              {fileLoading && (
+                <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading {artifact.path}...
+                </div>
+              )}
+              {fileError && (
+                <div className="p-4 text-xs text-destructive">
+                  Failed to load file: {fileError}
+                </div>
+              )}
+              {fileContent !== null && (
+                <MarkdownRenderer content={fileContent} />
+              )}
             </div>
           </ScrollArea>
         )}
@@ -143,18 +217,31 @@ export function WorkspacePanel({ artifact, onClose }: WorkspacePanelProps) {
         {(artifact.type === "code" || artifact.type === "text") && (
           <ScrollArea className="h-full">
             <div className="p-1">
-              <SyntaxHighlighter
-                language={getLanguage(artifact.path)}
-                style={oneDark}
-                showLineNumbers
-                customStyle={{
-                  margin: 0,
-                  borderRadius: "0.375rem",
-                  fontSize: "0.75rem",
-                }}
-              >
-                {`// Loading ${artifact.path} ...`}
-              </SyntaxHighlighter>
+              {fileLoading && (
+                <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading {artifact.path}...
+                </div>
+              )}
+              {fileError && (
+                <div className="p-4 text-xs text-destructive">
+                  Failed to load file: {fileError}
+                </div>
+              )}
+              {fileContent !== null && (
+                <SyntaxHighlighter
+                  language={getLanguage(artifact.path)}
+                  style={oneDark}
+                  showLineNumbers
+                  customStyle={{
+                    margin: 0,
+                    borderRadius: "0.375rem",
+                    fontSize: "0.75rem",
+                  }}
+                >
+                  {fileContent}
+                </SyntaxHighlighter>
+              )}
             </div>
           </ScrollArea>
         )}

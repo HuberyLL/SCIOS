@@ -172,7 +172,7 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
-export type ArtifactType = "pdf" | "image" | "code" | "text";
+export type ArtifactType = "pdf" | "image" | "code" | "text" | "markdown";
 
 export interface Artifact {
   type: ArtifactType;

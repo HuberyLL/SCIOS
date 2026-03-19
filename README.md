@@ -18,10 +18,17 @@ cp .env.example .env
 # 同步依赖 (推荐使用 uv)
 uv sync
 
-# 启动 FastAPI 开发服务器
-uv run fastapi dev src/main.py
-# 或者使用 uvicorn: uv run uvicorn src.main:app --reload --port 8000
+# 启动 FastAPI 开发服务器 (推荐使用 make dev)
+make dev
+# 等效于: uv run fastapi dev src/main.py --reload-dir src
 ```
+
+> **⚠️ 重要提示**: 请使用 `make dev` 而非直接运行 `uv run fastapi dev src/main.py`。
+> 直接运行 `fastapi dev` 会监听整个 `backend/` 目录的文件变化，
+> 包括 Agent 在 `workspace/` 中生成的文件，导致 **服务器频繁热重载**，
+> 断开 WebSocket 连接并中断 Agent 执行。`make dev` 使用 `--reload-dir src`
+> 参数将监听范围限定在源代码目录中，避免此问题。
+
 后端启动后，接口地址默认在：`http://localhost:8000`
 API 文档 (Swagger UI)：`http://localhost:8000/docs`
 

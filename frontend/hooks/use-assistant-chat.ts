@@ -18,6 +18,7 @@ import type {
 const ARTIFACT_PATTERNS: { regex: RegExp; type: ArtifactType }[] = [
   { regex: /(?:^|\s)([\w/.=-]+\.pdf)\b/i, type: "pdf" },
   { regex: /(?:^|\s)([\w/.=-]+\.(?:png|jpg|jpeg|gif|svg|webp))\b/i, type: "image" },
+  { regex: /(?:^|\s)([\w/.=-]+\.md)\b/i, type: "markdown" },
   { regex: /(?:^|\s)([\w/.=-]+\.(?:py|ts|js|tsx|jsx|sh|r|tex|csv))\b/i, type: "code" },
 ];
 
@@ -162,9 +163,21 @@ export function useAssistantChat(
     wsRef.current = ws;
 
     ws.onopen = () => {
+      const isReconnect = reconnectCount.current > 0;
       setIsConnected(true);
       setError(null);
       reconnectCount.current = 0;
+
+      if (isReconnect && sessionId) {
+        getAssistantSession(sessionId)
+          .then((data) => {
+            if (wsRef.current === ws) {
+              setMessages(convertHistoryMessages(data.messages));
+              setIsLoading(false);
+            }
+          })
+          .catch(() => {});
+      }
     };
 
     ws.onclose = () => {
@@ -211,10 +224,24 @@ export function useAssistantChat(
           const msgs = [...prev];
           const last = msgs[msgs.length - 1];
           if (last?.role === "assistant" && last.isStreaming) {
-            msgs[msgs.length - 1] = {
-              ...last,
-              content: last.content + delta,
-            };
+            const allToolsDone =
+              last.tool_calls.length > 0 &&
+              last.tool_calls.every((tc) => tc.status !== "running");
+            if (allToolsDone) {
+              msgs[msgs.length - 1] = { ...last, isStreaming: false };
+              msgs.push({
+                id: genId(),
+                role: "assistant",
+                content: delta,
+                tool_calls: [],
+                isStreaming: true,
+              });
+            } else {
+              msgs[msgs.length - 1] = {
+                ...last,
+                content: last.content + delta,
+              };
+            }
           } else {
             msgs.push({
               id: genId(),
@@ -234,19 +261,40 @@ export function useAssistantChat(
         setMessages((prev) => {
           const msgs = [...prev];
           const last = msgs[msgs.length - 1];
+          const newTc: ToolCallBlock = {
+            tool_call_id,
+            tool_name,
+            args: tool_args,
+            status: "running",
+          };
+
           if (last?.role === "assistant" && last.isStreaming) {
-            msgs[msgs.length - 1] = {
-              ...last,
-              tool_calls: [
-                ...last.tool_calls,
-                {
-                  tool_call_id,
-                  tool_name,
-                  args: tool_args,
-                  status: "running",
-                },
-              ],
-            };
+            const allToolsDone =
+              last.tool_calls.length > 0 &&
+              last.tool_calls.every((tc) => tc.status !== "running");
+            if (allToolsDone && last.content) {
+              msgs[msgs.length - 1] = { ...last, isStreaming: false };
+              msgs.push({
+                id: genId(),
+                role: "assistant",
+                content: "",
+                tool_calls: [newTc],
+                isStreaming: true,
+              });
+            } else {
+              msgs[msgs.length - 1] = {
+                ...last,
+                tool_calls: [...last.tool_calls, newTc],
+              };
+            }
+          } else {
+            msgs.push({
+              id: genId(),
+              role: "assistant",
+              content: "",
+              tool_calls: [newTc],
+              isStreaming: true,
+            });
           }
           return msgs;
         });
@@ -259,14 +307,49 @@ export function useAssistantChat(
           const msgs = [...prev];
           const last = msgs[msgs.length - 1];
           if (last?.role === "assistant" && last.isStreaming) {
-            msgs[msgs.length - 1] = {
-              ...last,
-              tool_calls: last.tool_calls.map((tc) =>
-                tc.tool_call_id === tool_call_id
-                  ? { ...tc, status: "completed" as const, result }
-                  : tc,
-              ),
-            };
+            const exists = last.tool_calls.some(
+              (tc) => tc.tool_call_id === tool_call_id,
+            );
+            if (exists) {
+              msgs[msgs.length - 1] = {
+                ...last,
+                tool_calls: last.tool_calls.map((tc) =>
+                  tc.tool_call_id === tool_call_id
+                    ? { ...tc, status: "completed" as const, result }
+                    : tc,
+                ),
+              };
+            } else {
+              msgs[msgs.length - 1] = {
+                ...last,
+                tool_calls: [
+                  ...last.tool_calls,
+                  {
+                    tool_call_id,
+                    tool_name,
+                    args: {},
+                    status: "completed" as const,
+                    result,
+                  },
+                ],
+              };
+            }
+          } else {
+            msgs.push({
+              id: genId(),
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  tool_call_id,
+                  tool_name,
+                  args: {},
+                  status: "completed" as const,
+                  result,
+                },
+              ],
+              isStreaming: true,
+            });
           }
           return msgs;
         });
@@ -283,7 +366,7 @@ export function useAssistantChat(
           if (last?.role === "assistant" && last.isStreaming) {
             msgs[msgs.length - 1] = {
               ...last,
-              content: event.data.content || last.content,
+              content: last.content || event.data.content || "",
               isStreaming: false,
             };
           }

@@ -146,3 +146,29 @@ async def test_runner_reports_invalid_tool_json_arguments() -> None:
     assert len(tool_results) == 1
     result_text = tool_results[0]["data"]["result"]
     assert "invalid JSON arguments" in result_text
+
+
+@pytest.mark.asyncio
+async def test_runner_auto_updates_default_session_title_on_first_user_message() -> None:
+    session = AssistantSession(title="New Chat")
+    with Session(get_engine()) as db:
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+    round_1 = [
+        _chunk(content="Done."),
+        _chunk(finish_reason="stop"),
+    ]
+
+    runner = AssistantRunner(session.id)
+    runner.client = _FakeClient([round_1])  # type: ignore[assignment]
+
+    user_input = "Write a small experiment script for image classification"
+    _ = [event async for event in runner.stream_chat(user_input)]
+
+    with Session(get_engine()) as db:
+        saved = db.get(AssistantSession, session.id)
+        assert saved is not None
+        assert saved.title != "New Chat"
+        assert "image classification" in saved.title

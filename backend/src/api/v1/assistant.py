@@ -4,19 +4,31 @@ WebSocket endpoint for real-time streaming chat."""
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from src.agents.assistant.runner import AssistantRunner
+from src.agents.assistant.tools.fs_sandbox import resolve_and_check_path
 from src.models.assistant import AssistantMessage, AssistantSession, MessageRole
 from src.models.db import get_engine
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
+
+
+def _iso_utc(dt: datetime) -> str:
+    """Return an ISO-8601 timestamp normalized to UTC with explicit timezone."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 # ------------------------------------------------------------------
@@ -67,8 +79,8 @@ def create_session(body: CreateSessionRequest) -> SessionOut:
     return SessionOut(
         id=session.id,
         title=session.title,
-        created_at=session.created_at.isoformat(),
-        updated_at=session.updated_at.isoformat(),
+        created_at=_iso_utc(session.created_at),
+        updated_at=_iso_utc(session.updated_at),
     )
 
 
@@ -84,8 +96,8 @@ def list_sessions() -> SessionListOut:
             SessionOut(
                 id=r.id,
                 title=r.title,
-                created_at=r.created_at.isoformat(),
-                updated_at=r.updated_at.isoformat(),
+                created_at=_iso_utc(r.created_at),
+                updated_at=_iso_utc(r.updated_at),
             )
             for r in rows
         ]
@@ -107,8 +119,8 @@ def get_session(session_id: str) -> SessionDetailOut:
         session=SessionOut(
             id=session.id,
             title=session.title,
-            created_at=session.created_at.isoformat(),
-            updated_at=session.updated_at.isoformat(),
+            created_at=_iso_utc(session.created_at),
+            updated_at=_iso_utc(session.updated_at),
         ),
         messages=[
             MessageOut(
@@ -118,7 +130,7 @@ def get_session(session_id: str) -> SessionDetailOut:
                 content=m.content,
                 tool_calls=m.tool_calls,
                 tool_call_id=m.tool_call_id,
-                created_at=m.created_at.isoformat(),
+                created_at=_iso_utc(m.created_at),
             )
             for m in msgs
         ],
@@ -140,6 +152,24 @@ def delete_session(session_id: str) -> None:
             db.delete(m)
         db.delete(session)
         db.commit()
+
+
+# ------------------------------------------------------------------
+# Workspace file serving
+# ------------------------------------------------------------------
+
+@router.get("/workspace/{file_path:path}")
+def serve_workspace_file(file_path: str) -> FileResponse:
+    """Serve a file from the agent workspace for preview in the frontend."""
+    try:
+        resolved = resolve_and_check_path(file_path)
+    except PermissionError:
+        raise HTTPException(403, "Access denied")
+
+    if not resolved.is_file():
+        raise HTTPException(404, f"File not found: {file_path}")
+
+    return FileResponse(resolved)
 
 
 # ------------------------------------------------------------------

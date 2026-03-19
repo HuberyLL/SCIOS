@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 _LOG_TAIL_CHARS = 1000
 _PDFLATEX_TIMEOUT = 60
+_MACOS_PDFLATEX_BIN = "/Library/TeX/texbin/pdflatex"
+_PDFLATEX_FALLBACKS = (
+    Path(_MACOS_PDFLATEX_BIN),
+    Path("/usr/texbin/pdflatex"),
+)
 
 
 class CompileLatexArgs(BaseModel):
@@ -23,6 +30,32 @@ class CompileLatexArgs(BaseModel):
         ...,
         description="Relative path (within workspace) to the .tex file to compile.",
     )
+
+
+def _build_latex_env() -> dict[str, str]:
+    """Return env with common TeX paths included."""
+    env = os.environ.copy()
+    path_entries = env.get("PATH", "").split(os.pathsep) if env.get("PATH") else []
+    if _MACOS_PDFLATEX_BIN.rsplit("/", 1)[0] not in path_entries:
+        path_entries.append(_MACOS_PDFLATEX_BIN.rsplit("/", 1)[0])
+    env["PATH"] = os.pathsep.join(path_entries)
+    return env
+
+
+def _resolve_pdflatex_executable(env: dict[str, str]) -> str | None:
+    """Resolve pdflatex path from env, with macOS/system fallbacks."""
+    custom = env.get("PDFLATEX_PATH")
+    if custom and Path(custom).is_file():
+        return custom
+
+    which_result = shutil.which("pdflatex", path=env.get("PATH"))
+    if which_result:
+        return which_result
+
+    for candidate in _PDFLATEX_FALLBACKS:
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 class CompileLatexTool(BaseTool):
@@ -46,11 +79,23 @@ class CompileLatexTool(BaseTool):
         work_dir = resolved.parent
         filename = resolved.name
 
+        env = _build_latex_env()
+        pdflatex_bin = _resolve_pdflatex_executable(env)
+        if not pdflatex_bin:
+            return (
+                "Error: pdflatex is not installed (or not found in PATH) in the local "
+                "environment. Please install a TeX distribution (e.g. MacTeX/TeX Live), "
+                "or set PDFLATEX_PATH to the executable."
+            )
+
         try:
             for pass_num in (1, 2):
                 proc = await asyncio.create_subprocess_exec(
-                    "pdflatex", "-interaction=nonstopmode", filename,
+                    pdflatex_bin,
+                    "-interaction=nonstopmode",
+                    filename,
                     cwd=str(work_dir),
+                    env=env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                 )
@@ -62,8 +107,8 @@ class CompileLatexTool(BaseTool):
                     return f"Error: pdflatex timed out on pass {pass_num} (>{_PDFLATEX_TIMEOUT}s)."
         except FileNotFoundError:
             return (
-                "Error: pdflatex is not installed in the local environment. "
-                "Please install a TeX distribution (e.g. TeX Live) first."
+                "Error: pdflatex executable was not found when launching compilation. "
+                "Please check your TeX installation and PATH/PDFLATEX_PATH."
             )
 
         pdf_path = resolved.with_suffix(".pdf")

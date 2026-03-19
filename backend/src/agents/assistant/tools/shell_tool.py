@@ -35,7 +35,7 @@ class BashSession:
             return self._proc
         workspace = get_workspace_dir()
         self._proc = await asyncio.create_subprocess_shell(
-            "/bin/bash --norc --noprofile",
+            "/bin/bash --norc",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,

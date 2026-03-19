@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Loader2,
   CheckCircle2,
@@ -48,12 +47,6 @@ interface ToolCallCardProps {
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const { tool_name, args, result, status } = toolCall;
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (status === "completed" || status === "error") {
-      setOpen(true);
-    }
-  }, [status]);
 
   const Icon = TOOL_ICONS[tool_name] || Terminal;
   const isTerminal = TERMINAL_TOOLS.has(tool_name);
@@ -113,9 +106,11 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
               <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 Arguments
               </div>
-              <pre className="overflow-x-auto rounded-md bg-zinc-950 p-2.5 font-mono text-xs text-zinc-300">
-                {JSON.stringify(args, null, 2)}
-              </pre>
+              <div className="max-h-48 overflow-y-auto rounded-md">
+                <pre className="overflow-x-auto bg-zinc-950 p-2.5 font-mono text-xs text-zinc-300">
+                  {JSON.stringify(args, null, 2)}
+                </pre>
+              </div>
             </div>
           )}
 
@@ -125,15 +120,15 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
                 Result
               </div>
               {isTerminal ? (
-                <ScrollArea className="max-h-64">
+                <div className="max-h-64 overflow-y-auto rounded-md">
                   <pre className="terminal-output">{result}</pre>
-                </ScrollArea>
+                </div>
               ) : (
-                <ScrollArea className="max-h-64">
-                  <pre className="overflow-x-auto rounded-md bg-zinc-950 p-2.5 font-mono text-xs text-zinc-300 whitespace-pre-wrap wrap-break-word">
+                <div className="max-h-64 overflow-y-auto rounded-md">
+                  <pre className="overflow-x-auto bg-zinc-950 p-2.5 font-mono text-xs text-zinc-300 whitespace-pre-wrap wrap-break-word">
                     {result}
                   </pre>
-                </ScrollArea>
+                </div>
               )}
             </div>
           )}
