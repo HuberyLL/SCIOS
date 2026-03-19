@@ -8,12 +8,23 @@ import litellm
 import pytest
 from pydantic import BaseModel
 
-from src.agents.llm_client import call_llm
+from src.agents.llm_client import _response_format_schema, call_llm
 
 
 class _Plan(BaseModel):
     query: str
     top_k: int
+
+
+class _NestedMeta(BaseModel):
+    language: str
+    tags: list[str]
+
+
+class _NestedPlan(BaseModel):
+    query: str
+    meta: _NestedMeta
+    variants: list[_NestedMeta]
 
 
 def _completion(content: str | None, *, refusal: str | None = None):
@@ -96,3 +107,13 @@ async def test_call_llm_retries_on_rate_limit(mocker) -> None:
     assert calls["n"] == 2
     assert out.query == "retry-ok"
     assert out.top_k == 2
+
+
+def test_response_format_schema_sets_additional_properties_false_recursively() -> None:
+    wrapped = _response_format_schema(_NestedPlan)
+    schema = wrapped["json_schema"]["schema"]
+
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"query", "meta", "variants"}
+    assert schema["$defs"]["_NestedMeta"]["additionalProperties"] is False
+    assert set(schema["$defs"]["_NestedMeta"]["required"]) == {"language", "tags"}

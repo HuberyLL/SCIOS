@@ -26,10 +26,51 @@ def _default_model() -> str:
     return get_settings().llm_model
 
 
+def _enforce_no_additional_properties(node: Any) -> None:
+    """Recursively enforce strict-object constraints for OpenAI JSON schema.
+
+    OpenAI strict JSON schema expects object nodes to explicitly define:
+    - ``additionalProperties: false``
+    - ``required`` including every key in ``properties``
+    """
+    if isinstance(node, dict):
+        is_object = node.get("type") == "object" or "properties" in node
+        if is_object:
+            node.setdefault("additionalProperties", False)
+            props = node.get("properties")
+            if isinstance(props, dict):
+                node["required"] = list(props.keys())
+
+        # Traverse common JSON-schema containers.
+        for key in ("properties", "$defs", "definitions", "patternProperties"):
+            value = node.get(key)
+            if isinstance(value, dict):
+                for child in value.values():
+                    _enforce_no_additional_properties(child)
+
+        # Traverse union / composition operators.
+        for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+            value = node.get(key)
+            if isinstance(value, list):
+                for child in value:
+                    _enforce_no_additional_properties(child)
+
+        # Traverse single-child schema fields.
+        for key in ("items", "contains", "not", "if", "then", "else"):
+            if key in node:
+                _enforce_no_additional_properties(node[key])
+        return
+
+    if isinstance(node, list):
+        for child in node:
+            _enforce_no_additional_properties(child)
+
+
 def _response_format_schema(response_format: type[T]) -> dict[str, Any]:
     """Build an OpenAI-style strict JSON schema response_format payload."""
     schema = response_format.model_json_schema()
     schema.pop("title", None)
+    _enforce_no_additional_properties(schema)
     return {
         "type": "json_schema",
         "json_schema": {

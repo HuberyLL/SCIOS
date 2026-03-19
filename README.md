@@ -15,6 +15,23 @@
 - **Interactive Academic Assistant**
   A powerful AI agent equipped with a local sandbox workspace. It can help you search for literature, analyze experimental data, and even write and compile LaTeX documents autonomously.
 
+## 📸 Screenshots
+
+### Explore Mode
+Generate structured topic exploration reports with core concepts, key scholars, must-read papers, and trend analysis.
+
+![Explore mode screenshot](docs/assets/explore.png)
+
+### Assistant Mode
+Use the interactive assistant to search papers, edit LaTeX files, and compile PDFs directly in the local workspace.
+
+![Assistant mode screenshot](docs/assets/assisant.png)
+
+### Monitor Mode
+Subscribe to topics and receive periodic research briefs with newly published papers and concise summaries.
+
+![Monitor mode screenshot](docs/assets/monitor.png)
+
 ## 🧰 Built-in Agent Tools
 
 The Interactive Assistant is equipped with a variety of powerful tools to perform complex tasks:
