@@ -1,64 +1,113 @@
-# SCIOS - Smart Research Agent
+<div align="center">
+  <h1>SCIOS</h1>
+  <p><strong>Your Own Personal AI Research Assistant</strong></p>
+  <p>An intelligent, locally-run academic agent designed to automate literature exploration, continuously monitor research fields, and assist in academic writing and data analysis.</p>
+</div>
 
-SCIOS 是一款本地运行的学术智能助手，专注于自动化主题探索与持续学术动态监控。
+## 🌟 Features
 
-## 🚀 快速启动指南
+- **Deep Research (Topic Exploration)**
+  Generate professional, concise academic reports for any given topic. SCIOS intelligently routes queries to the most relevant academic databases, retrieves and synthesizes papers, and provides structured insights.
+  
+- **Field Tracking (Topic Monitoring)**
+  Periodically track specific research fields or keywords for new developments. SCIOS runs automated scheduled tasks to fetch the latest papers and delivers summarized daily/weekly briefs directly to your dashboard and email.
 
-### 1. 启动后端 (Backend)
+- **Interactive Academic Assistant**
+  A powerful AI agent equipped with a local sandbox workspace. It can help you search for literature, analyze experimental data, and even write and compile LaTeX documents autonomously.
 
-后端提供了核心的 Agent 流水线与 API 接口。
+## 🧰 Built-in Agent Tools
 
-```bash
-# 进入后端目录
-cd backend
+The Interactive Assistant is equipped with a variety of powerful tools to perform complex tasks:
 
-# 复制并配置环境变量 (请在 .env 中填入你的 API Keys: OpenAI/Gemini/Tavily/Semantic Scholar)
-cp .env.example .env
+- **Academic Search (`search_academic_papers`)**: Search for papers across multiple academic databases.
+- **Web Search (`web_search`)**: Access the internet via Tavily to find the latest news, tutorials, and general knowledge.
+- **Workspace Operations (`read_file`, `write_file`, `edit_file`, `glob_search`)**: Read, create, and precisely edit files within a secure local sandbox.
+- **Persistent Shell (`run_bash_command`)**: Execute shell commands, manage files, and install dependencies in a persistent bash session.
+- **Python REPL (`run_python_code`)**: Execute Python code for data analysis, plotting, or testing algorithms.
+- **LaTeX Compiler (`compile_latex`)**: Automatically compile `.tex` files into PDF documents and fix compilation errors.
+- **Data Parser (`parse_csv_log`)**: Quickly extract and analyze metrics from experimental CSV logs.
 
-# 同步依赖 (推荐使用 uv)
-uv sync
+## 📚 Supported Academic Sources
 
-# 启动 FastAPI 开发服务器 (推荐使用 make dev)
-make dev
-# 等效于: uv run fastapi dev src/main.py --reload-dir src
-```
+SCIOS integrates a hybrid intelligent routing mechanism to query the most appropriate sources for your topic. Supported sources include:
 
-> **⚠️ 重要提示**: 请使用 `make dev` 而非直接运行 `uv run fastapi dev src/main.py`。
-> 直接运行 `fastapi dev` 会监听整个 `backend/` 目录的文件变化，
-> 包括 Agent 在 `workspace/` 中生成的文件，导致 **服务器频繁热重载**，
-> 断开 WebSocket 连接并中断 Agent 执行。`make dev` 使用 `--reload-dir src`
-> 参数将监听范围限定在源代码目录中，避免此问题。
-
-后端启动后，接口地址默认在：`http://localhost:8000`
-API 文档 (Swagger UI)：`http://localhost:8000/docs`
-
-### 2. 启动前端 (Frontend)
-
-前端提供了美观的用户交互界面，支持 SSE 流式状态渲染。
-
-```bash
-# 打开一个新的终端窗口，进入前端目录
-cd frontend
-
-# 安装依赖包
-npm install
-
-# 启动 Next.js 开发服务器
-npm run dev
-```
-前端启动后，访问地址：`http://localhost:3000`
+- **ArXiv** (Computer Science, Physics, Math)
+- **PubMed & PMC & EuropePMC** (Biomedical, Life Sciences)
+- **bioRxiv & medRxiv** (Biology and Medicine Preprints)
+- **Semantic Scholar** (General academic graph)
+- **Crossref & OpenAlex** (Broad scholarly metadata)
+- **CORE** (Open access research papers)
+- **dblp** (Computer Science bibliography)
+- **DOAJ** (Directory of Open Access Journals)
 
 ---
 
-## 🛠️ 如何体验核心功能
+## 🚀 Getting Started
 
-1. **主题探索 (Deep Research)**
-   - 打开浏览器访问 `http://localhost:3000`。
-   - 在 Explore 页面的大搜索框中输入你感兴趣的学术话题，例如："Transformer in healthcare" 或 "RLHF in large language models"。
-   - 点击回车，你将看到实时的 Agent 检索进度（SSE 流式推送），最终生成包含核心概念、推荐学者、经典论文及趋势分析的结构化精美报告。
+SCIOS is split into a Python backend (FastAPI) and a Next.js frontend. Below are the instructions to set up and run the project.
 
-2. **长期监控 (Topic Monitoring)**
-   - 点击页面顶部的 "Monitor" 标签。
-   - 添加一个你想持续追踪的关键词或领域。
-   - 后端的定时任务会自动每天/每周在后台抓取最新论文，并生成简报。你可以在面板中点击查看历史的 Daily Brief。
-   - (如果在后端 `.env` 中配置了 SMTP 邮箱，还会自动推送到你的邮箱！)
+### Prerequisites
+
+- **Python** >= 3.10
+- **Node.js** >= 18.x
+- **uv** (Recommended Python package manager)
+- **pdflatex** (Optional, required only if you want the Assistant to compile LaTeX)
+
+### 1. Backend Setup
+
+```bash
+# Navigate to the backend directory
+cd backend
+
+# Copy the environment template
+cp .env.example .env
+```
+
+#### Configuration (`.env`)
+You must configure the API keys in your `.env` file for SCIOS to function properly:
+- `LLM_API_KEY`: Your OpenAI/Gemini/DeepSeek API key.
+- `LLM_BASE_URL`: (Optional) Custom API endpoint if you are using a proxy or a compatible local model (e.g., vLLM, Ollama).
+- `LLM_MODEL`: The model to use (e.g., `gpt-4o`).
+- `TAVILY_API_KEY`: API key for Tavily Web Search.
+- *(Optional)* Add other specific source keys like `CORE_API_KEY`, `DOAJ_API_KEY`, or your email for Unpaywall/Crossref to enhance search stability.
+- *(Optional)* Configure `SMTP_*` variables if you want to receive monitoring reports via email.
+
+#### Run the Backend
+
+Instead of using development hot-reloading, run the backend using standard FastAPI commands:
+
+```bash
+# Install dependencies
+uv sync
+
+# Run the backend server
+uv run fastapi run src/main.py --host 0.0.0.0 --port 8000
+```
+*The backend API will be available at `http://localhost:8000`. API documentation is at `http://localhost:8000/docs`.*
+
+### 2. Frontend Setup
+
+Open a new terminal window to start the Next.js frontend.
+
+```bash
+# Navigate to the frontend directory
+cd frontend
+
+# Install dependencies
+npm install
+
+# Build the project for production
+npm run build
+
+# Start the production server
+npm run start
+```
+*The frontend interface will be accessible at `http://localhost:3000`.*
+
+---
+
+## 💡 How to Use
+
+1. **Deep Research**: Open `http://localhost:3000`, enter a complex academic query (e.g., "Reinforcement Learning from Human Feedback in LLMs"), and let the agent retrieve, synthesize, and format a comprehensive report for you.
+2. **Monitoring**: Navigate to the "Monitor" tab, add a research field, and SCIOS will automatically track and compile daily/weekly literature briefs.
+3. **Assistant**: Engage with the Interactive Assistant. Ask it to "Search for the latest papers on graph neural networks, summarize the top 3, write a brief LaTeX introduction about them, and compile it to PDF." Watch it plan, execute tools, and fix errors autonomously in the workspace.
