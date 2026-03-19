@@ -136,7 +136,7 @@ export function SessionSidebar({
                   }
                 }}
                 className={cn(
-                  "group flex w-full cursor-pointer items-start gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
+                  "group relative flex w-full cursor-pointer items-start gap-2 rounded-md px-2.5 py-2 pr-8 text-left transition-colors",
                   currentSessionId === s.id
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -153,7 +153,14 @@ export function SessionSidebar({
                 </div>
                 <button
                   onClick={(e) => handleDelete(e, s.id)}
-                  className="mt-0.5 hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive group-hover:flex"
+                  title="Delete session"
+                  aria-label="Delete session"
+                  className={cn(
+                    "absolute right-2 top-2 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive",
+                    currentSessionId === s.id
+                      ? "opacity-100"
+                      : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+                  )}
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
