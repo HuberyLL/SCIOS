@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     assistant_model: str = ""
     assistant_system_prompt: str = ""
     assistant_max_tool_rounds: int = 10
+    assistant_workspace_dir: str = "workspace"
 
     # -- Synthesizer --------------------------------------------------------
     synthesizer_max_papers: int = 40

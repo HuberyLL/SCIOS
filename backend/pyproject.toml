@@ -11,6 +11,7 @@ dependencies = [
     "feedparser>=6.0.12",
     "httpx>=0.28.1",
     "openai>=2.29.0",
+    "pandas>=3.0.1",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.13.1",
     "pypdf>=6.9.1",
