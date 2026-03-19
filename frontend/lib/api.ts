@@ -1,5 +1,7 @@
 import type {
   ApiResponse,
+  AssistantMessageOut,
+  AssistantSession,
   BriefData,
   CreateMonitorRequest,
   DeleteMonitorTaskData,
@@ -92,4 +94,56 @@ export async function deleteMonitorTask(taskId: string): Promise<DeleteMonitorTa
 
 export function monitoringStreamUrl(): string {
   return "/api/v1/monitoring/stream";
+}
+
+// ---------------------------------------------------------------------------
+// Assistant
+// ---------------------------------------------------------------------------
+
+export async function createAssistantSession(
+  title = "New Chat",
+): Promise<AssistantSession> {
+  const res = await fetch("/api/v1/assistant/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  return res.json() as Promise<AssistantSession>;
+}
+
+export async function listAssistantSessions(): Promise<AssistantSession[]> {
+  const res = await fetch("/api/v1/assistant/sessions", { cache: "no-store" });
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  const json = (await res.json()) as { sessions: AssistantSession[] };
+  return json.sessions;
+}
+
+export async function getAssistantSession(
+  sessionId: string,
+): Promise<{ session: AssistantSession; messages: AssistantMessageOut[] }> {
+  const res = await fetch(`/api/v1/assistant/sessions/${sessionId}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  return res.json() as Promise<{
+    session: AssistantSession;
+    messages: AssistantMessageOut[];
+  }>;
+}
+
+export async function deleteAssistantSession(
+  sessionId: string,
+): Promise<void> {
+  const res = await fetch(`/api/v1/assistant/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok && res.status !== 204)
+    throw new ApiError(`HTTP ${res.status}`, res.status);
+}
+
+export function assistantWsUrl(sessionId: string): string {
+  const base =
+    process.env.NEXT_PUBLIC_WS_BASE_URL || "ws://localhost:8000";
+  return `${base}/api/v1/assistant/ws/${sessionId}`;
 }
