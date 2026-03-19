@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     source_routing_stage_b_enabled: bool = True
     source_routing_min_papers_stage_b: int = 5
 
+    # -- Assistant mode ------------------------------------------------------
+    assistant_model: str = ""
+    assistant_system_prompt: str = ""
+    assistant_max_tool_rounds: int = 10
+
     # -- Synthesizer --------------------------------------------------------
     synthesizer_max_papers: int = 40
 
