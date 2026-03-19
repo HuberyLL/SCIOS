@@ -65,12 +65,36 @@ cp .env.example .env
 
 #### Configuration (`.env`)
 You must configure the API keys in your `.env` file for SCIOS to function properly:
-- `LLM_API_KEY`: Your OpenAI/Gemini/DeepSeek API key.
-- `LLM_BASE_URL`: (Optional) Custom API endpoint if you are using a proxy or a compatible local model (e.g., vLLM, Ollama).
-- `LLM_MODEL`: The model to use (e.g., `gpt-4o`).
+- `LLM_API_KEY`: API key for your selected provider.
+- `LLM_BASE_URL`: API base URL. Keep the default for OpenAI; set it for OpenAI-compatible providers.
+- `LLM_MODEL`: Model name in LiteLLM format.
 - `TAVILY_API_KEY`: API key for Tavily Web Search.
 - *(Optional)* Add other specific source keys like `CORE_API_KEY`, `DOAJ_API_KEY`, or your email for Unpaywall/Crossref to enhance search stability.
 - *(Optional)* Configure `SMTP_*` variables if you want to receive monitoring reports via email.
+
+##### Multi-model provider examples (via LiteLLM)
+
+```bash
+# OpenAI
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o
+LLM_API_KEY=<OPENAI_API_KEY>
+
+# Anthropic Claude
+LLM_BASE_URL=
+LLM_MODEL=anthropic/claude-3-5-sonnet-20241022
+LLM_API_KEY=<ANTHROPIC_API_KEY>
+
+# Google Gemini
+LLM_BASE_URL=
+LLM_MODEL=gemini/gemini-1.5-pro
+LLM_API_KEY=<GEMINI_API_KEY>
+
+# DeepSeek
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_MODEL=deepseek-chat
+LLM_API_KEY=<DEEPSEEK_API_KEY>
+```
 
 #### Run the Backend
 

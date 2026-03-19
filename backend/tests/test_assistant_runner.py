@@ -44,22 +44,8 @@ async def _to_async_iter(chunks: list[Any]) -> AsyncGenerator[Any, None]:
         yield chunk
 
 
-class _FakeCompletions:
-    def __init__(self, streams: list[list[Any]]) -> None:
-        self._streams = streams
-
-    async def create(self, **_: Any) -> AsyncGenerator[Any, None]:
-        assert self._streams, "No fake stream left for create()"
-        return _to_async_iter(self._streams.pop(0))
-
-
-class _FakeClient:
-    def __init__(self, streams: list[list[Any]]) -> None:
-        self.chat = SimpleNamespace(completions=_FakeCompletions(streams))
-
-
 @pytest.mark.asyncio
-async def test_runner_persists_messages_and_updates_session_timestamp() -> None:
+async def test_runner_persists_messages_and_updates_session_timestamp(mocker) -> None:
     session = AssistantSession(title="Runner Test")
     with Session(get_engine()) as db:
         db.add(session)
@@ -85,9 +71,15 @@ async def test_runner_persists_messages_and_updates_session_timestamp() -> None:
         _chunk(finish_reason="stop"),
     ]
 
-    runner = AssistantRunner(session.id)
-    runner.client = _FakeClient([round_1, round_2])  # type: ignore[assignment]
+    mocker.patch(
+        "litellm.acompletion",
+        side_effect=[
+            _to_async_iter(round_1),
+            _to_async_iter(round_2),
+        ],
+    )
 
+    runner = AssistantRunner(session.id)
     events = [event async for event in runner.stream_chat("What time is it now?")]
     event_types = [event["event"] for event in events]
     assert "tool_call_start" in event_types
@@ -112,7 +104,7 @@ async def test_runner_persists_messages_and_updates_session_timestamp() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_reports_invalid_tool_json_arguments() -> None:
+async def test_runner_reports_invalid_tool_json_arguments(mocker) -> None:
     session = AssistantSession(title="Invalid Args Test")
     with Session(get_engine()) as db:
         db.add(session)
@@ -137,9 +129,15 @@ async def test_runner_reports_invalid_tool_json_arguments() -> None:
         _chunk(finish_reason="stop"),
     ]
 
-    runner = AssistantRunner(session.id)
-    runner.client = _FakeClient([round_1, round_2])  # type: ignore[assignment]
+    mocker.patch(
+        "litellm.acompletion",
+        side_effect=[
+            _to_async_iter(round_1),
+            _to_async_iter(round_2),
+        ],
+    )
 
+    runner = AssistantRunner(session.id)
     events = [event async for event in runner.stream_chat("Use tool with invalid args")]
     tool_results = [e for e in events if e["event"] == "tool_call_result"]
 
@@ -149,7 +147,7 @@ async def test_runner_reports_invalid_tool_json_arguments() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_auto_updates_default_session_title_on_first_user_message() -> None:
+async def test_runner_auto_updates_default_session_title_on_first_user_message(mocker) -> None:
     session = AssistantSession(title="New Chat")
     with Session(get_engine()) as db:
         db.add(session)
@@ -161,9 +159,14 @@ async def test_runner_auto_updates_default_session_title_on_first_user_message()
         _chunk(finish_reason="stop"),
     ]
 
-    runner = AssistantRunner(session.id)
-    runner.client = _FakeClient([round_1])  # type: ignore[assignment]
+    mocker.patch(
+        "litellm.acompletion",
+        side_effect=[
+            _to_async_iter(round_1),
+        ],
+    )
 
+    runner = AssistantRunner(session.id)
     user_input = "Write a small experiment script for image classification"
     _ = [event async for event in runner.stream_chat(user_input)]
 

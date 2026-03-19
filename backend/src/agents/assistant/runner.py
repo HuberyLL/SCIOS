@@ -10,8 +10,8 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
 
+import litellm
 import tiktoken
-from openai import AsyncOpenAI
 from pydantic import ValidationError
 from sqlmodel import Session, select
 
@@ -45,11 +45,9 @@ class AssistantRunner:
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         cfg = get_settings()
-        self.client = AsyncOpenAI(
-            base_url=cfg.llm_base_url,
-            api_key=cfg.llm_api_key,
-        )
         self.model = cfg.assistant_model or cfg.llm_model
+        self.api_base = cfg.llm_base_url or None
+        self.api_key = cfg.llm_api_key or None
         self.max_rounds = cfg.assistant_max_tool_rounds
         self.max_context_tokens = cfg.assistant_max_context_tokens
         self.max_memory_items = cfg.assistant_memory_max_items
@@ -334,11 +332,13 @@ class AssistantRunner:
 
         for _round in range(self.max_rounds):
             try:
-                stream = await self.client.chat.completions.create(
+                stream = await litellm.acompletion(
                     model=self.model,
                     messages=messages,
                     tools=tool_defs or None,
                     stream=True,
+                    api_base=self.api_base,
+                    api_key=self.api_key,
                 )
             except Exception as exc:
                 logger.exception("LLM call failed")
