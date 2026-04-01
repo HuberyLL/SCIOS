@@ -2,16 +2,15 @@
 
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, AlertCircle, RotateCcw } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { useLandscapeStream } from "@/hooks/use-landscape-stream";
+import type { TaskStatus } from "@/types";
 
 interface LandscapeProgressProps {
-  taskId: string;
-  onComplete: () => void;
-  onRetry: () => void;
+  messages: string[];
+  status: TaskStatus | null;
+  error: string | null;
 }
 
 const STAGE_WEIGHTS: Record<string, number> = {
@@ -34,13 +33,8 @@ function estimateProgress(messages: string[]): number {
   return Math.min(10 + messages.length * 10, 95);
 }
 
-export function LandscapeProgress({ taskId, onComplete, onRetry }: LandscapeProgressProps) {
-  const { messages, status, error } = useLandscapeStream(taskId);
+export function LandscapeProgress({ messages, status, error }: LandscapeProgressProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (status === "completed") onComplete();
-  }, [status, onComplete]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -58,12 +52,8 @@ export function LandscapeProgress({ taskId, onComplete, onRetry }: LandscapeProg
   const failed = status === "failed";
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mx-auto flex min-h-[calc(100vh-3.5rem)] max-w-2xl flex-col items-center justify-center gap-8 px-6"
-    >
-      <div className="w-full text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
+      <div className="w-full max-w-2xl text-center">
         <h2 className="mb-2 text-lg font-semibold text-foreground">
           {failed ? "Analysis Failed" : "Building Research Landscape..."}
         </h2>
@@ -75,7 +65,7 @@ export function LandscapeProgress({ taskId, onComplete, onRetry }: LandscapeProg
       </div>
 
       {!failed && (
-        <div className="w-full space-y-1">
+        <div className="w-full max-w-2xl space-y-1">
           <Progress value={progress} className="h-1.5" />
           <p className="text-right font-mono text-[11px] text-muted-foreground/60">
             {progress}%
@@ -85,7 +75,7 @@ export function LandscapeProgress({ taskId, onComplete, onRetry }: LandscapeProg
 
       <div
         ref={scrollRef}
-        className="w-full max-h-64 overflow-y-auto rounded-lg border border-border/50 bg-muted/30 p-4"
+        className="w-full max-w-2xl max-h-64 overflow-y-auto rounded-lg border border-border/50 bg-muted/30 p-4"
       >
         <AnimatePresence initial={false}>
           {messages.map((msg, i) => (
@@ -111,20 +101,15 @@ export function LandscapeProgress({ taskId, onComplete, onRetry }: LandscapeProg
         )}
       </div>
 
-      {failed ? (
-        <Button variant="outline" onClick={onRetry} className="gap-2">
-          <RotateCcw className="h-3.5 w-3.5" />
-          Retry
-        </Button>
-      ) : (
-        <div className="w-full space-y-3">
+      {!failed && (
+        <div className="w-full max-w-2xl space-y-3">
           <Skeleton className="h-4 w-3/4" />
           <Skeleton className="h-4 w-1/2" />
           <Skeleton className="h-4 w-5/6" />
         </div>
       )}
 
-      {failed && (
+      {failed && error && (
         <div className="flex items-center gap-2 text-xs text-destructive">
           <AlertCircle className="h-3.5 w-3.5" />
           {error}
@@ -137,6 +122,6 @@ export function LandscapeProgress({ taskId, onComplete, onRetry }: LandscapeProg
           This may take 60–120 seconds
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

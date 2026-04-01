@@ -9,11 +9,9 @@ import {
   AlertTriangle,
   FileText,
   Clock,
-  Search,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ResearchGapsView } from "./research-gaps-view";
 import { PaperDetailPanel } from "./paper-detail-panel";
 import type { DynamicResearchLandscape, PaperResult } from "@/types";
@@ -29,7 +27,6 @@ const CollaborationGraph = dynamic(
 
 interface LandscapeBoardProps {
   landscape: DynamicResearchLandscape;
-  onNewSearch: () => void;
 }
 
 const fadeUp = {
@@ -37,7 +34,7 @@ const fadeUp = {
   animate: { opacity: 1, y: 0 },
 };
 
-export function LandscapeBoard({ landscape, onNewSearch }: LandscapeBoardProps) {
+export function LandscapeBoard({ landscape }: LandscapeBoardProps) {
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
 
   const paperMap = useMemo(() => {
@@ -82,43 +79,37 @@ export function LandscapeBoard({ landscape, onNewSearch }: LandscapeBoardProps) 
       animate="animate"
       variants={fadeUp}
       transition={{ duration: 0.4 }}
-      className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-6"
+      className="flex flex-1 flex-col gap-4 overflow-hidden px-6 py-4"
     >
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-            {meta.topic}
-          </h1>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <div className="space-y-1">
+        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+          {meta.topic}
+        </h1>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <FileText className="h-3 w-3" />
+            {meta.paper_count} papers
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <GitBranch className="h-3 w-3" />
+            {tech_tree.nodes.length} tech nodes
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Network className="h-3 w-3" />
+            {collaboration_network.nodes.length} scholars
+          </span>
+          {generatedDate && (
             <span className="inline-flex items-center gap-1">
-              <FileText className="h-3 w-3" />
-              {meta.paper_count} papers
+              <Clock className="h-3 w-3" />
+              {generatedDate}
             </span>
-            <span className="inline-flex items-center gap-1">
-              <GitBranch className="h-3 w-3" />
-              {tech_tree.nodes.length} tech nodes
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <Network className="h-3 w-3" />
-              {collaboration_network.nodes.length} scholars
-            </span>
-            {generatedDate && (
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {generatedDate}
-              </span>
-            )}
-          </div>
+          )}
         </div>
-        <Button variant="outline" size="sm" onClick={onNewSearch} className="gap-1.5 shrink-0">
-          <Search className="h-3.5 w-3.5" />
-          New Search
-        </Button>
       </div>
 
       {/* Tab views */}
-      <Tabs defaultValue="tech-tree" className="flex-1">
+      <Tabs defaultValue="tech-tree" className="flex min-h-0 flex-1 flex-col">
         <TabsList className="w-full justify-start">
           <TabsTrigger value="tech-tree" className="gap-1.5">
             <GitBranch className="h-3.5 w-3.5" />
@@ -144,18 +135,18 @@ export function LandscapeBoard({ landscape, onNewSearch }: LandscapeBoardProps) 
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="tech-tree" className="mt-3 h-[calc(100vh-16rem)]">
+        <TabsContent value="tech-tree" className="mt-3 flex-1">
           <TechTreeView data={tech_tree} onPaperClick={handlePaperClick} />
         </TabsContent>
 
-        <TabsContent value="collaboration" className="mt-3 h-[calc(100vh-16rem)]">
+        <TabsContent value="collaboration" className="mt-3 flex-1">
           <CollaborationGraph
             data={collaboration_network}
             onScholarClick={handleScholarClick}
           />
         </TabsContent>
 
-        <TabsContent value="gaps" className="mt-3 h-[calc(100vh-16rem)] overflow-auto">
+        <TabsContent value="gaps" className="mt-3 flex-1 overflow-auto">
           <ResearchGapsView data={research_gaps} onPaperClick={handlePaperClick} />
         </TabsContent>
       </Tabs>

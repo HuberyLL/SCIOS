@@ -47,6 +47,69 @@ class TaskStatusResponse(BaseModel):
     error: str | None = None
 
 
+class TaskListItem(BaseModel):
+    task_id: str
+    topic: str
+    status: TaskStatus
+    progress_message: str
+    has_result: bool
+    created_at: str
+    updated_at: str
+
+
+class TaskListResponse(BaseModel):
+    data: list[TaskListItem]
+    meta: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class DeleteTaskData(BaseModel):
+    task_id: str
+    deleted: bool
+
+
+class DeleteTaskResponse(BaseModel):
+    data: DeleteTaskData
+    meta: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# GET /tasks  (list recent landscape tasks)
+# ---------------------------------------------------------------------------
+
+@router.get("/tasks", response_model=TaskListResponse)
+async def list_tasks(limit: int = 50) -> TaskListResponse:
+    """Return recent landscape tasks (without full result payloads)."""
+    records = task_manager.list_tasks(limit=min(limit, 200))
+    items = [
+        TaskListItem(
+            task_id=r.id,
+            topic=r.topic,
+            status=r.status,
+            progress_message=r.progress_message,
+            has_result=r.result is not None,
+            created_at=r.created_at.isoformat(),
+            updated_at=r.updated_at.isoformat(),
+        )
+        for r in records
+    ]
+    return TaskListResponse(data=items)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /{task_id}
+# ---------------------------------------------------------------------------
+
+@router.delete("/{task_id}", response_model=DeleteTaskResponse)
+async def delete_landscape_task(task_id: str) -> DeleteTaskResponse:
+    """Delete a landscape task record."""
+    deleted = task_manager.delete_task(task_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return DeleteTaskResponse(data=DeleteTaskData(task_id=task_id, deleted=True))
+
+
 # ---------------------------------------------------------------------------
 # POST /start
 # ---------------------------------------------------------------------------

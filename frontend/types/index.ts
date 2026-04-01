@@ -107,6 +107,16 @@ export interface DynamicResearchLandscape {
   sources: string[];
 }
 
+export interface LandscapeTaskListItem {
+  task_id: string;
+  topic: string;
+  status: TaskStatus;
+  progress_message: string;
+  has_result: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LandscapeIncrement {
   new_papers: PaperResult[];
   new_tech_nodes: TechTreeNode[];

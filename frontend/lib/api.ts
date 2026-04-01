@@ -5,6 +5,7 @@ import type {
   BriefData,
   CreateMonitorRequest,
   DeleteMonitorTaskData,
+  LandscapeTaskListItem,
   LandscapeTaskStatus,
   MonitorTaskData,
   TaskStatusData,
@@ -83,6 +84,20 @@ export async function getLandscapeStatus(
 
 export function landscapeStreamUrl(taskId: string): string {
   return `/api/v1/landscape/${taskId}/stream`;
+}
+
+export async function listLandscapeTasks(
+  limit = 50,
+): Promise<LandscapeTaskListItem[]> {
+  return request<LandscapeTaskListItem[]>(`/landscape/tasks?limit=${limit}`);
+}
+
+export async function deleteLandscapeTask(
+  taskId: string,
+): Promise<{ task_id: string; deleted: boolean }> {
+  return request<{ task_id: string; deleted: boolean }>(`/landscape/${taskId}`, {
+    method: "DELETE",
+  });
 }
 
 // ---------------------------------------------------------------------------

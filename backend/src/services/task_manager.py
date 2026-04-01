@@ -72,6 +72,28 @@ def get_task(task_id: str) -> TaskRecord | None:
         return session.get(TaskRecord, task_id)
 
 
+def list_tasks(limit: int = 50) -> list[TaskRecord]:
+    """Return recent landscape tasks ordered by created_at desc."""
+    with Session(get_engine()) as session:
+        statement = (
+            select(TaskRecord)
+            .order_by(TaskRecord.created_at.desc())
+            .limit(limit)
+        )
+        return list(session.exec(statement).all())
+
+
+def delete_task(task_id: str) -> bool:
+    """Delete a task record by primary key. Returns True if deleted."""
+    with Session(get_engine()) as session:
+        record = session.get(TaskRecord, task_id)
+        if record is None:
+            return False
+        session.delete(record)
+        session.commit()
+        return True
+
+
 def _update_fields(task_id: str, **kwargs: Any) -> None:
     with Session(get_engine()) as session:
         record = session.get(TaskRecord, task_id)
