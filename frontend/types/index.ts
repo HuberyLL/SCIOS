@@ -1,5 +1,162 @@
 // ---------------------------------------------------------------------------
-// Exploration domain — mirrors backend/src/agents/exploration/schemas.py
+// Dynamic Research Landscape — mirrors backend/src/models/landscape.py
+// ---------------------------------------------------------------------------
+
+// -- TechTree ---------------------------------------------------------------
+
+export type TechTreeNodeType = "method" | "paper" | "milestone";
+export type TechTreeRelation =
+  | "evolves_from"
+  | "extends"
+  | "alternative_to"
+  | "inspires";
+
+export interface TechTreeNode {
+  node_id: string;
+  label: string;
+  node_type: TechTreeNodeType;
+  year: number | null;
+  description: string;
+  representative_paper_ids: string[];
+  is_new: boolean;
+}
+
+export interface TechTreeEdge {
+  source: string;
+  target: string;
+  relation: TechTreeRelation;
+  label: string;
+}
+
+export interface TechTree {
+  nodes: TechTreeNode[];
+  edges: TechTreeEdge[];
+}
+
+// -- CollaborationNetwork ---------------------------------------------------
+
+export interface ScholarNode {
+  scholar_id: string;
+  name: string;
+  affiliations: string[];
+  paper_count: number;
+  citation_count: number;
+  top_paper_ids: string[];
+  is_new: boolean;
+}
+
+export interface CollaborationEdge {
+  source: string;
+  target: string;
+  weight: number;
+  shared_paper_ids: string[];
+}
+
+export interface CollaborationNetwork {
+  nodes: ScholarNode[];
+  edges: CollaborationEdge[];
+}
+
+// -- ComparisonMatrix -------------------------------------------------------
+
+export interface MethodologyDetail {
+  approach: string;
+  key_technique: string;
+  novelty: string;
+}
+
+export interface DatasetInfo {
+  name: string;
+  domain: string;
+  scale: string;
+}
+
+export interface MetricScore {
+  metric_name: string;
+  value: string;
+  dataset: string;
+}
+
+export interface PaperComparison {
+  paper_id: string;
+  title: string;
+  year: number | null;
+  methodology: MethodologyDetail;
+  datasets: DatasetInfo[];
+  metrics: MetricScore[];
+  limitations: string[];
+  url: string;
+}
+
+export interface ComparisonMatrix {
+  dimension_columns: string[];
+  papers: PaperComparison[];
+}
+
+// -- ResearchGaps -----------------------------------------------------------
+
+export type GapImpact = "high" | "medium" | "low";
+
+export interface ResearchGap {
+  gap_id: string;
+  title: string;
+  description: string;
+  evidence_paper_ids: string[];
+  potential_approaches: string[];
+  impact: GapImpact;
+}
+
+export interface ResearchGaps {
+  gaps: ResearchGap[];
+  summary: string;
+}
+
+// -- Envelope ---------------------------------------------------------------
+
+export interface LandscapeMeta {
+  topic: string;
+  generated_at: string;
+  paper_count: number;
+  version: number;
+}
+
+export interface PaperResult {
+  paper_id: string;
+  title: string;
+  authors: string[];
+  abstract: string;
+  doi: string;
+  published_date: string;
+  pdf_url: string;
+  url: string;
+  source: string;
+  categories: string[];
+  citation_count: number;
+}
+
+export interface DynamicResearchLandscape {
+  meta: LandscapeMeta;
+  tech_tree: TechTree;
+  collaboration_network: CollaborationNetwork;
+  comparison_matrix: ComparisonMatrix;
+  research_gaps: ResearchGaps;
+  papers: PaperResult[];
+  sources: string[];
+}
+
+export interface LandscapeIncrement {
+  new_papers: PaperResult[];
+  new_tech_nodes: TechTreeNode[];
+  new_tech_edges: TechTreeEdge[];
+  new_scholars: ScholarNode[];
+  new_collab_edges: CollaborationEdge[];
+  new_comparisons: PaperComparison[];
+  new_gaps: ResearchGap[];
+  detected_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Exploration domain (legacy) — mirrors backend/src/agents/exploration/schemas.py
 // ---------------------------------------------------------------------------
 
 export interface CoreConcept {

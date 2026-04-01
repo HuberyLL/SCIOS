@@ -1,0 +1,58 @@
+"""Shared Pydantic models for academic paper and web-search results.
+
+These are the canonical definitions — the single source of truth.
+The legacy path ``src.agents.tools._schemas`` re-exports from here
+for backward compatibility.
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Paper-related schemas
+# ---------------------------------------------------------------------------
+
+class PaperResult(BaseModel):
+    """Unified representation of a single academic paper across all sources."""
+
+    paper_id: str
+    title: str
+    authors: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    doi: str = ""
+    published_date: str = ""
+    pdf_url: str = ""
+    url: str = ""
+    source: str = ""
+    categories: list[str] = Field(default_factory=list)
+    citation_count: int = 0
+
+
+class SearchResult(BaseModel):
+    """Wrapper for a batch of paper search results."""
+
+    query: str
+    total: int = 0
+    papers: list[PaperResult] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Web-search schemas
+# ---------------------------------------------------------------------------
+
+class WebSearchItem(BaseModel):
+    """A single web-search hit returned by Tavily."""
+
+    title: str
+    url: str
+    content: str
+    score: float = 0.0
+
+
+class WebSearchResult(BaseModel):
+    """Wrapper for a batch of web-search results."""
+
+    query: str
+    results: list[WebSearchItem] = Field(default_factory=list)

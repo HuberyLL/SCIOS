@@ -1,53 +1,13 @@
-"""Shared Pydantic models for all tool outputs."""
+"""Backward-compatible re-exports of shared Pydantic models.
 
-from __future__ import annotations
+Canonical definitions now live in ``src.models.paper``.  This module
+re-exports them so that existing ``from src.agents.tools._schemas import ...``
+statements continue to work without modification.
+"""
 
-from pydantic import BaseModel, Field
-
-
-# ---------------------------------------------------------------------------
-# Paper-related schemas
-# ---------------------------------------------------------------------------
-
-class PaperResult(BaseModel):
-    """Unified representation of a single academic paper across all sources."""
-
-    paper_id: str
-    title: str
-    authors: list[str] = Field(default_factory=list)
-    abstract: str = ""
-    doi: str = ""
-    published_date: str = ""
-    pdf_url: str = ""
-    url: str = ""
-    source: str = ""
-    categories: list[str] = Field(default_factory=list)
-    citation_count: int = 0
-
-
-class SearchResult(BaseModel):
-    """Wrapper for a batch of paper search results."""
-
-    query: str
-    total: int = 0
-    papers: list[PaperResult] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Web-search schemas
-# ---------------------------------------------------------------------------
-
-class WebSearchItem(BaseModel):
-    """A single web-search hit returned by Tavily."""
-
-    title: str
-    url: str
-    content: str
-    score: float = 0.0
-
-
-class WebSearchResult(BaseModel):
-    """Wrapper for a batch of web-search results."""
-
-    query: str
-    results: list[WebSearchItem] = Field(default_factory=list)
+from src.models.paper import (  # noqa: F401
+    PaperResult,
+    SearchResult,
+    WebSearchItem,
+    WebSearchResult,
+)
