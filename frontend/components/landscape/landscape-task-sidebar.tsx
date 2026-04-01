@@ -144,45 +144,45 @@ export function LandscapeTaskSidebar({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "group flex w-full flex-col gap-1 rounded-md px-3 py-2 text-left transition-colors cursor-pointer",
+                      "group flex w-full flex-col gap-1.5 rounded-md px-3 py-2.5 text-left transition-colors cursor-pointer",
                       selectedId === task.task_id
                         ? "bg-accent"
                         : "hover:bg-muted/60",
                     )}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-medium">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="line-clamp-2 text-xs font-medium leading-relaxed">
                         {task.topic}
                       </span>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Badge
-                          variant={cfg.variant}
-                          className="gap-1 px-1.5 py-0 text-[9px]"
-                        >
-                          <Icon
-                            className={cn(
-                              "h-2.5 w-2.5",
-                              task.status === "running" && "animate-spin",
-                            )}
-                          />
-                          {cfg.label}
-                        </Badge>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(task.task_id);
-                          }}
-                          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
-                          aria-label={`Delete ${task.topic}`}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(task.task_id);
+                        }}
+                        className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`Delete ${task.topic}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <Clock className="h-2.5 w-2.5" />
-                      {formatDate(task.updated_at)}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Clock className="h-2.5 w-2.5" />
+                        {formatDate(task.updated_at)}
+                      </div>
+                      <Badge
+                        variant={cfg.variant}
+                        className="gap-1 px-1.5 py-0 text-[9px]"
+                      >
+                        <Icon
+                          className={cn(
+                            "h-2.5 w-2.5",
+                            task.status === "running" && "animate-spin",
+                          )}
+                        />
+                        {cfg.label}
+                      </Badge>
                     </div>
                   </motion.div>
                 );
