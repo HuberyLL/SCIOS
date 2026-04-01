@@ -3,9 +3,9 @@ import { LandscapeWorkspace } from "@/components/landscape/landscape-workspace";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex h-screen flex-col bg-background">
       <AppHeader />
-      <main className="flex-1">
+      <main className="flex-1 overflow-hidden">
         <LandscapeWorkspace />
       </main>
     </div>
