@@ -15,7 +15,6 @@ from src.models.landscape import (
     CollaborationNetwork,
     DynamicResearchLandscape,
     LandscapeMeta,
-    PaperComparison,
 )
 from src.models.paper import PaperResult
 
@@ -68,7 +67,6 @@ def assemble_landscape(
 
     # Deep-copy LLM outputs to avoid mutating the originals
     tech_tree = copy.deepcopy(analysis.tech_tree)
-    comparison_matrix = copy.deepcopy(analysis.comparison_matrix)
     research_gaps = copy.deepcopy(analysis.research_gaps)
     collab = copy.deepcopy(collaboration_network)
 
@@ -79,15 +77,6 @@ def assemble_landscape(
             valid_ids,
             f"TechTreeNode('{node.node_id}').representative_paper_ids",
         )
-
-    # --- Sanitise ComparisonMatrix ---
-    clean_comparisons: list[PaperComparison] = []
-    for comp in comparison_matrix.papers:
-        if comp.paper_id in valid_ids:
-            clean_comparisons.append(comp)
-        else:
-            logger.warning("Removed PaperComparison with invalid paper_id '%s'", comp.paper_id)
-    comparison_matrix.papers = clean_comparisons
 
     # --- Sanitise ResearchGaps ---
     for gap in research_gaps.gaps:
@@ -122,7 +111,6 @@ def assemble_landscape(
         meta=meta,
         tech_tree=tech_tree,
         collaboration_network=collab,
-        comparison_matrix=comparison_matrix,
         research_gaps=research_gaps,
         papers=papers,
         sources=sources,
@@ -130,9 +118,9 @@ def assemble_landscape(
 
     logger.info(
         "Assembled DynamicResearchLandscape  papers=%d  sources=%d  "
-        "tech_nodes=%d  scholars=%d  comparisons=%d  gaps=%d",
+        "tech_nodes=%d  scholars=%d  gaps=%d",
         len(papers), len(sources),
         len(tech_tree.nodes), len(collab.nodes),
-        len(comparison_matrix.papers), len(research_gaps.gaps),
+        len(research_gaps.gaps),
     )
     return landscape

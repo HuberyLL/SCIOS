@@ -46,7 +46,7 @@ async def run_landscape_pipeline(
        citations.
     3a. **GraphBuilder** (data-driven) -- CollaborationNetwork from
         co-authorship.
-    3b. **LLM Analyzer** -- TechTree + ComparisonMatrix + ResearchGaps.
+    3b. **LLM Analyzer** -- TechTree + ResearchGaps.
         *3a and 3b run concurrently.*
     4. **Assembler** -- merge, sanitise references, emit final JSON.
     """
@@ -96,12 +96,11 @@ async def run_landscape_pipeline(
 
     logger.info(
         "Landscape pipeline complete  total=%.1fs  papers=%d  "
-        "tech_nodes=%d  scholars=%d  comparisons=%d  gaps=%d",
+        "tech_nodes=%d  scholars=%d  gaps=%d",
         time.perf_counter() - t_total,
         len(landscape.papers),
         len(landscape.tech_tree.nodes),
         len(landscape.collaboration_network.nodes),
-        len(landscape.comparison_matrix.papers),
         len(landscape.research_gaps.gaps),
     )
     return landscape

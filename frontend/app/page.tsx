@@ -1,16 +1,28 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
 import { AppHeader } from "@/components/app-header";
 import { SearchHero } from "@/components/exploration/search-hero";
 import { LandscapeProgress } from "@/components/landscape/landscape-progress";
 import { LandscapeBoard } from "@/components/landscape/landscape-board";
+import { MonitoringView } from "@/components/monitoring/monitoring-view";
 import { startLandscape, getLandscapeStatus } from "@/lib/api";
 import type { DynamicResearchLandscape } from "@/types";
 
 type LandscapePhase = "idle" | "loading" | "completed" | "failed";
 
 function HomeContent() {
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab") || "explore";
+
+  const [activeTab, setActiveTab] = useState(tab);
+
+  useEffect(() => {
+    setActiveTab(tab);
+  }, [tab]);
+
   const [phase, setPhase] = useState<LandscapePhase>("idle");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [landscape, setLandscape] = useState<DynamicResearchLandscape | null>(null);
@@ -96,36 +108,58 @@ function HomeContent() {
       <AppHeader />
 
       <main className="flex-1">
-        {phase === "idle" && <SearchHero onSearch={handleSearch} />}
+        <AnimatePresence mode="wait">
+          {activeTab === "explore" ? (
+            <motion.div
+              key="explore"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              {phase === "idle" && <SearchHero onSearch={handleSearch} />}
 
-        {phase === "loading" && taskId && (
-          <LandscapeProgress
-            key={taskId}
-            taskId={taskId}
-            onComplete={handleStreamComplete}
-            onRetry={handleRetry}
-          />
-        )}
+              {phase === "loading" && taskId && (
+                <LandscapeProgress
+                  key={taskId}
+                  taskId={taskId}
+                  onComplete={handleStreamComplete}
+                  onRetry={handleRetry}
+                />
+              )}
 
-        {phase === "failed" && (
-          <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center">
-            <div className="text-center">
-              <p className="mb-4 text-sm text-muted-foreground">
-                Landscape analysis failed. Please try again.
-              </p>
-              <button
-                onClick={handleRetry}
-                className="text-sm font-medium underline underline-offset-4"
-              >
-                Retry
-              </button>
-            </div>
-          </div>
-        )}
+              {phase === "failed" && (
+                <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center">
+                  <div className="text-center">
+                    <p className="mb-4 text-sm text-muted-foreground">
+                      Landscape analysis failed. Please try again.
+                    </p>
+                    <button
+                      onClick={handleRetry}
+                      className="text-sm font-medium underline underline-offset-4"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              )}
 
-        {phase === "completed" && landscape && (
-          <LandscapeBoard landscape={landscape} onNewSearch={resetToIdle} />
-        )}
+              {phase === "completed" && landscape && (
+                <LandscapeBoard landscape={landscape} onNewSearch={resetToIdle} />
+              )}
+            </motion.div>
+          ) : (
+            <motion.div
+              key="monitor"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <MonitoringView />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );

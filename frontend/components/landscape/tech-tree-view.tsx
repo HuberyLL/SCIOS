@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import {
   ReactFlow,
   Controls,
@@ -90,14 +90,8 @@ export function TechTreeView({ data, onPaperClick }: TechTreeViewProps) {
     [data],
   );
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-
-  useEffect(() => {
-    const { nodes: n, edges: e } = layoutGraph(data);
-    setNodes(n);
-    setEdges(e);
-  }, [data, setNodes, setEdges]);
+  const [nodes, , onNodesChange] = useNodesState(initialNodes);
+  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
 
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -138,7 +132,7 @@ export function TechTreeView({ data, onPaperClick }: TechTreeViewProps) {
           nodeStrokeWidth={2}
           pannable
           zoomable
-          className="bg-background/80! border-border/50!"
+          className="!bg-background/80 !border-border/50"
         />
       </ReactFlow>
     </div>

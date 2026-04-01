@@ -1,4 +1,4 @@
-"""LLM Analyzer: produce TechTree + ComparisonMatrix + ResearchGaps.
+"""LLM Analyzer: produce TechTree + ResearchGaps.
 
 Calls the LLM with ``response_format=LandscapeAnalysis`` to get
 structured output.  The prompt includes paper_ids explicitly so the

@@ -149,68 +149,7 @@ class CollaborationNetwork(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 3. ComparisonMatrix — 横向文献对比矩阵
-# ---------------------------------------------------------------------------
-
-
-class MethodologyDetail(BaseModel):
-    """Structured extraction of a paper's methodology."""
-
-    approach: str = Field(..., description="Method name or category.")
-    key_technique: str = Field(default="", description="Core technique employed.")
-    novelty: str = Field(default="", description="What makes this approach novel.")
-
-
-class DatasetInfo(BaseModel):
-    """A dataset used in a paper's experiments."""
-
-    name: str
-    domain: str = Field(default="", description="Application domain (e.g. NLP, CV).")
-    scale: str = Field(default="", description='Size descriptor (e.g. "10K images").')
-
-
-class MetricScore(BaseModel):
-    """A single evaluation metric and its reported value.
-
-    ``value`` is kept as ``str`` to accommodate heterogeneous formats like
-    percentages, "N/A", or ranges.
-    """
-
-    metric_name: str = Field(..., description='Metric identifier (e.g. "BLEU", "F1").')
-    value: str = Field(..., description="Reported score as a string.")
-    dataset: str = Field(default="", description="Dataset the score was measured on.")
-
-
-class PaperComparison(BaseModel):
-    """Structured extraction for one paper — a single row in the matrix."""
-
-    paper_id: str
-    title: str
-    year: int | None = None
-    methodology: MethodologyDetail
-    datasets: list[DatasetInfo] = Field(default_factory=list)
-    metrics: list[MetricScore] = Field(default_factory=list)
-    limitations: list[str] = Field(default_factory=list)
-    url: str = ""
-
-
-class ComparisonMatrix(BaseModel):
-    """Side-by-side literature comparison matrix."""
-
-    dimension_columns: list[str] = Field(
-        default_factory=lambda: [
-            "Methodology",
-            "Datasets",
-            "Metrics",
-            "Limitations",
-        ],
-        description="Column names that the front-end should render.",
-    )
-    papers: list[PaperComparison] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# 4. ResearchGaps — 研究空白挖掘
+# 3. ResearchGaps — 研究空白挖掘
 # ---------------------------------------------------------------------------
 
 
@@ -242,7 +181,7 @@ class ResearchGaps(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 5. Envelope — DynamicResearchLandscape (顶层输出)
+# 4. Envelope — DynamicResearchLandscape (顶层输出)
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +205,6 @@ class DynamicResearchLandscape(BaseModel):
     meta: LandscapeMeta
     tech_tree: TechTree = Field(default_factory=TechTree)
     collaboration_network: CollaborationNetwork = Field(default_factory=CollaborationNetwork)
-    comparison_matrix: ComparisonMatrix = Field(default_factory=ComparisonMatrix)
     research_gaps: ResearchGaps = Field(default_factory=ResearchGaps)
     papers: list[PaperResult] = Field(
         default_factory=list,
@@ -297,10 +235,6 @@ class DynamicResearchLandscape(BaseModel):
                 if pid not in paper_ids:
                     missing.append(f"CollaborationEdge('{edge.source}'->'{edge.target}').shared_paper_ids: '{pid}'")
 
-        for comp in self.comparison_matrix.papers:
-            if comp.paper_id not in paper_ids:
-                missing.append(f"PaperComparison.paper_id: '{comp.paper_id}'")
-
         for gap in self.research_gaps.gaps:
             for pid in gap.evidence_paper_ids:
                 if pid not in paper_ids:
@@ -316,7 +250,7 @@ class DynamicResearchLandscape(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 6. Incremental update — LandscapeIncrement (增量监控)
+# 5. Incremental update — LandscapeIncrement (增量监控)
 # ---------------------------------------------------------------------------
 
 
@@ -332,6 +266,5 @@ class LandscapeIncrement(BaseModel):
     new_tech_edges: list[TechTreeEdge] = Field(default_factory=list)
     new_scholars: list[ScholarNode] = Field(default_factory=list)
     new_collab_edges: list[CollaborationEdge] = Field(default_factory=list)
-    new_comparisons: list[PaperComparison] = Field(default_factory=list)
     new_gaps: list[ResearchGap] = Field(default_factory=list)
     detected_at: datetime | None = Field(default=None, description="Timestamp of detection.")

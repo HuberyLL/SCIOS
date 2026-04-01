@@ -19,10 +19,7 @@ import pytest
 
 from src.models.landscape import (
     CollaborationNetwork,
-    ComparisonMatrix,
     DynamicResearchLandscape,
-    MethodologyDetail,
-    PaperComparison,
     ResearchGap,
     ResearchGaps,
     ScholarNode,
@@ -78,15 +75,6 @@ def _minimal_analysis(paper_ids: list[str] | None = None) -> LandscapeAnalysis:
         ),
     ]
     edges: list[TechTreeEdge] = []
-    comparisons = []
-    for pid in pids[:2]:
-        comparisons.append(
-            PaperComparison(
-                paper_id=pid,
-                title=f"Paper {pid}",
-                methodology=MethodologyDetail(approach="Approach"),
-            )
-        )
     gaps = [
         ResearchGap(
             gap_id="gap_1",
@@ -97,7 +85,6 @@ def _minimal_analysis(paper_ids: list[str] | None = None) -> LandscapeAnalysis:
     ]
     return LandscapeAnalysis(
         tech_tree=TechTree(nodes=nodes, edges=edges),
-        comparison_matrix=ComparisonMatrix(papers=comparisons),
         research_gaps=ResearchGaps(gaps=gaps, summary="Summary"),
     )
 
@@ -247,7 +234,6 @@ class TestAssembler:
 
         analysis = LandscapeAnalysis(
             tech_tree=TechTree(),
-            comparison_matrix=ComparisonMatrix(),
             research_gaps=ResearchGaps(
                 gaps=[
                     ResearchGap(
@@ -268,40 +254,6 @@ class TestAssembler:
         )
         assert landscape.research_gaps.gaps[0].evidence_paper_ids == ["p1"]
 
-    def test_sanitises_invalid_comparison(self):
-        """PaperComparison with invalid paper_id is removed entirely."""
-        p1 = _paper("p1")
-        eps = [_enriched(p1)]
-        data = EnrichedRetrievedData(enriched_papers=eps)
-
-        analysis = LandscapeAnalysis(
-            tech_tree=TechTree(),
-            comparison_matrix=ComparisonMatrix(
-                papers=[
-                    PaperComparison(
-                        paper_id="p1",
-                        title="Valid",
-                        methodology=MethodologyDetail(approach="A"),
-                    ),
-                    PaperComparison(
-                        paper_id="MISSING",
-                        title="Invalid",
-                        methodology=MethodologyDetail(approach="B"),
-                    ),
-                ]
-            ),
-            research_gaps=ResearchGaps(),
-        )
-        collab = CollaborationNetwork()
-        landscape = assemble_landscape(
-            topic="Test",
-            analysis=analysis,
-            collaboration_network=collab,
-            enriched_data=data,
-        )
-        assert len(landscape.comparison_matrix.papers) == 1
-        assert landscape.comparison_matrix.papers[0].paper_id == "p1"
-
     def test_sanitises_collab_network_paper_ids(self):
         """Invalid paper_ids in CollaborationNetwork are cleaned."""
         p1 = _paper("p1")
@@ -309,7 +261,6 @@ class TestAssembler:
         data = EnrichedRetrievedData(enriched_papers=eps)
         analysis = LandscapeAnalysis(
             tech_tree=TechTree(),
-            comparison_matrix=ComparisonMatrix(),
             research_gaps=ResearchGaps(),
         )
         collab = CollaborationNetwork(
@@ -347,7 +298,6 @@ class TestAssembler:
         data = EnrichedRetrievedData(enriched_papers=eps, web_results=[wr])
         analysis = LandscapeAnalysis(
             tech_tree=TechTree(),
-            comparison_matrix=ComparisonMatrix(),
             research_gaps=ResearchGaps(),
         )
         landscape = assemble_landscape(

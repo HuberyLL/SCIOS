@@ -16,14 +16,9 @@ from src.models.paper import PaperResult
 from src.models.landscape import (
     CollaborationEdge,
     CollaborationNetwork,
-    ComparisonMatrix,
-    DatasetInfo,
     DynamicResearchLandscape,
     LandscapeIncrement,
     LandscapeMeta,
-    MethodologyDetail,
-    MetricScore,
-    PaperComparison,
     ResearchGap,
     ResearchGaps,
     ScholarNode,
@@ -100,25 +95,6 @@ def _collab_edge(**overrides) -> CollaborationEdge:
     return CollaborationEdge(**defaults)
 
 
-def _comparison(**overrides) -> PaperComparison:
-    defaults = dict(
-        paper_id="p1",
-        title="Test Paper",
-        year=2024,
-        methodology=MethodologyDetail(
-            approach="Transformer",
-            key_technique="Multi-head attention",
-            novelty="First pure-attention model",
-        ),
-        datasets=[DatasetInfo(name="WMT-14", domain="NLP", scale="4.5M pairs")],
-        metrics=[MetricScore(metric_name="BLEU", value="28.4", dataset="WMT-14")],
-        limitations=["High computational cost"],
-        url="https://example.com/p1",
-    )
-    defaults.update(overrides)
-    return PaperComparison(**defaults)
-
-
 def _gap(**overrides) -> ResearchGap:
     defaults = dict(
         gap_id="gap_1",
@@ -148,7 +124,6 @@ def _full_landscape() -> DynamicResearchLandscape:
             nodes=[_scholar()],
             edges=[_collab_edge()],
         ),
-        comparison_matrix=ComparisonMatrix(papers=[_comparison()]),
         research_gaps=ResearchGaps(gaps=[_gap()], summary="Several gaps identified."),
         papers=[_paper()],
         sources=["https://example.com/p1"],
@@ -292,56 +267,6 @@ class TestCollaborationNetwork:
 
 
 # ===================================================================
-# ComparisonMatrix
-# ===================================================================
-
-
-class TestMethodologyDetail:
-    def test_required_approach(self):
-        with pytest.raises(ValidationError):
-            MethodologyDetail(key_technique="x")
-
-    def test_defaults(self):
-        m = MethodologyDetail(approach="CNN")
-        assert m.key_technique == ""
-        assert m.novelty == ""
-
-
-class TestMetricScore:
-    def test_string_value_accepts_na(self):
-        ms = MetricScore(metric_name="F1", value="N/A")
-        assert ms.value == "N/A"
-
-    def test_string_value_accepts_percentage(self):
-        ms = MetricScore(metric_name="Accuracy", value="92.3%", dataset="ImageNet")
-        assert ms.value == "92.3%"
-
-
-class TestPaperComparison:
-    def test_valid_construction(self):
-        pc = _comparison()
-        assert pc.methodology.approach == "Transformer"
-        assert len(pc.datasets) == 1
-        assert len(pc.metrics) == 1
-        assert pc.limitations == ["High computational cost"]
-
-
-class TestComparisonMatrix:
-    def test_default_dimension_columns(self):
-        matrix = ComparisonMatrix()
-        assert "Methodology" in matrix.dimension_columns
-        assert "Datasets" in matrix.dimension_columns
-        assert "Metrics" in matrix.dimension_columns
-        assert "Limitations" in matrix.dimension_columns
-
-    def test_json_round_trip(self):
-        matrix = ComparisonMatrix(papers=[_comparison()])
-        restored = ComparisonMatrix.model_validate_json(matrix.model_dump_json())
-        assert restored.papers[0].paper_id == "p1"
-        assert restored.papers[0].methodology.approach == "Transformer"
-
-
-# ===================================================================
 # ResearchGaps
 # ===================================================================
 
@@ -401,7 +326,6 @@ class TestDynamicResearchLandscape:
         )
         assert landscape.tech_tree.nodes == []
         assert landscape.collaboration_network.edges == []
-        assert landscape.comparison_matrix.papers == []
         assert landscape.research_gaps.gaps == []
         assert landscape.papers == []
         assert landscape.sources == []
@@ -411,7 +335,6 @@ class TestDynamicResearchLandscape:
         assert landscape.meta.topic == "Transformer in NLP"
         assert len(landscape.tech_tree.nodes) == 1
         assert len(landscape.collaboration_network.nodes) == 1
-        assert len(landscape.comparison_matrix.papers) == 1
         assert len(landscape.research_gaps.gaps) == 1
         assert len(landscape.papers) == 1
 
@@ -425,7 +348,6 @@ class TestDynamicResearchLandscape:
         assert isinstance(restored.meta.generated_at, datetime)
         assert restored.tech_tree.nodes[0].node_id == "method_transformer"
         assert restored.collaboration_network.nodes[0].name == "Ashish Vaswani"
-        assert restored.comparison_matrix.papers[0].methodology.approach == "Transformer"
         assert restored.research_gaps.gaps[0].impact == "high"
         assert restored.papers[0].paper_id == "p1"
         assert restored.sources == ["https://example.com/p1"]
@@ -453,14 +375,6 @@ class TestDynamicResearchLandscape:
                 collaboration_network=CollaborationNetwork(
                     nodes=[_scholar(top_paper_ids=["ghost"])],
                 ),
-                papers=[],
-            )
-
-    def test_paper_id_validator_catches_missing_ref_in_comparison(self):
-        with pytest.raises(ValidationError, match="paper_id reference"):
-            DynamicResearchLandscape(
-                meta=LandscapeMeta(topic="T", generated_at=_TS),
-                comparison_matrix=ComparisonMatrix(papers=[_comparison(paper_id="ghost")]),
                 papers=[],
             )
 
@@ -500,9 +414,6 @@ class TestDynamicResearchLandscape:
             for pid in scholar.top_paper_ids:
                 assert pid in paper_ids
 
-        for comp in landscape.comparison_matrix.papers:
-            assert comp.paper_id in paper_ids
-
         for gap in landscape.research_gaps.gaps:
             for pid in gap.evidence_paper_ids:
                 assert pid in paper_ids
@@ -521,7 +432,6 @@ class TestLandscapeIncrement:
         assert inc.new_tech_edges == []
         assert inc.new_scholars == []
         assert inc.new_collab_edges == []
-        assert inc.new_comparisons == []
         assert inc.new_gaps == []
         assert inc.detected_at is None
 
@@ -533,7 +443,6 @@ class TestLandscapeIncrement:
             new_tech_edges=[_tech_edge(source="method_new", target="method_new")],
             new_scholars=[_scholar(scholar_id="scholar_new", name="New Scholar", is_new=True)],
             new_collab_edges=[_collab_edge(source="scholar_new", target="scholar_new")],
-            new_comparisons=[_comparison(paper_id="p2", title="New Paper")],
             new_gaps=[_gap(gap_id="gap_2", title="New gap")],
             detected_at=ts,
         )
