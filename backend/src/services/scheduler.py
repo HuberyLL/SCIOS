@@ -178,6 +178,7 @@ async def run_daily_jobs() -> None:
                     session.commit()
             continue
 
+        increment_id = ""
         with Session(engine) as session:
             record = MonitorBrief(
                 task_id=task.id,
@@ -192,11 +193,13 @@ async def run_daily_jobs() -> None:
                 session.add(db_task)
 
             session.commit()
+            session.refresh(record)
+            increment_id = record.id
 
         logger.info("Stored increment for task %s (topic=%s)", task.id, task.topic)
         _publish_monitoring_event({
             "type": "increment_ready",
-            "increment_id": record.id,
+            "increment_id": increment_id,
             "task_id": task.id,
             "topic": task.topic,
             "increment": increment_dict,

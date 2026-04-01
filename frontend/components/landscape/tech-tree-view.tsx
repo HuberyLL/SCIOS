@@ -138,7 +138,7 @@ export function TechTreeView({ data, onPaperClick }: TechTreeViewProps) {
           nodeStrokeWidth={2}
           pannable
           zoomable
-          className="!bg-background/80 !border-border/50"
+          className="bg-background/80! border-border/50!"
         />
       </ReactFlow>
     </div>

@@ -50,10 +50,11 @@ export function useLandscapeMonitor(topic: string | null) {
   // Check subscription status on mount / topic change
   useEffect(() => {
     if (!topic) return;
+    const currentTopic = topic;
     let cancelled = false;
     seenIncrementIdsRef.current = new Set();
     try {
-      sinceCursorRef.current = localStorage.getItem(cursorKey(topic));
+      sinceCursorRef.current = localStorage.getItem(cursorKey(currentTopic));
     } catch {
       sinceCursorRef.current = null;
     }
@@ -61,17 +62,18 @@ export function useLandscapeMonitor(topic: string | null) {
     async function check() {
       setState((s) => ({ ...s, loading: true }));
       try {
-        const res = await getSubscription(topic);
+        const res = await getSubscription(currentTopic);
         if (cancelled) return;
         if (res.subscribed && res.data) {
+          const subscription = res.data;
           setState((s) => ({
             ...s,
             subscribed: true,
-            subscriptionId: res.data.id,
+            subscriptionId: subscription.id,
             loading: false,
           }));
           const increments = await getLandscapeIncrements(
-            topic,
+            currentTopic,
             sinceCursorRef.current || undefined,
           );
           if (cancelled) return;

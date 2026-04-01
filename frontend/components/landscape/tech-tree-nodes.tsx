@@ -48,7 +48,7 @@ function TechTreeNodeInner({ data }: NodeProps) {
     <div
       className={`group relative rounded-lg border px-3 py-2 shadow-sm transition-shadow hover:shadow-md ${cfg.bg} ${cfg.border} min-w-[140px] max-w-[220px]`}
     >
-      <Handle type="target" position={Position.Top} className="!bg-muted-foreground/40 !h-2 !w-2" />
+      <Handle type="target" position={Position.Top} className="bg-muted-foreground/40! h-2! w-2!" />
 
       {d.isNew && (
         <Badge className="absolute -top-2.5 -right-2.5 animate-pulse bg-emerald-500 px-1.5 py-0 text-[10px] text-white">
@@ -74,7 +74,7 @@ function TechTreeNodeInner({ data }: NodeProps) {
         </p>
       )}
 
-      <Handle type="source" position={Position.Bottom} className="!bg-muted-foreground/40 !h-2 !w-2" />
+      <Handle type="source" position={Position.Bottom} className="bg-muted-foreground/40! h-2! w-2!" />
     </div>
   );
 }
