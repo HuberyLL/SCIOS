@@ -2,13 +2,8 @@ import type {
   ApiResponse,
   AssistantMessageOut,
   AssistantSession,
-  BriefData,
-  CreateMonitorRequest,
-  DeleteMonitorTaskData,
   LandscapeTaskListItem,
   LandscapeTaskStatus,
-  MonitorTaskData,
-  TaskStatusData,
 } from "@/types";
 
 class ApiError extends Error {
@@ -38,29 +33,6 @@ async function request<T>(
   const json = (await res.json()) as ApiResponse<T>;
   if (json.error) throw new ApiError(json.error, res.status);
   return json.data;
-}
-
-// ---------------------------------------------------------------------------
-// Exploration
-// ---------------------------------------------------------------------------
-
-export async function startExploration(
-  topic: string,
-): Promise<{ task_id: string }> {
-  return request<{ task_id: string }>("/exploration/start", {
-    method: "POST",
-    body: JSON.stringify({ topic }),
-  });
-}
-
-export async function getExplorationStatus(
-  taskId: string,
-): Promise<TaskStatusData> {
-  return request<TaskStatusData>(`/exploration/${taskId}/status`);
-}
-
-export function explorationStreamUrl(taskId: string): string {
-  return `/api/v1/exploration/${taskId}/stream`;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,41 +70,6 @@ export async function deleteLandscapeTask(
   return request<{ task_id: string; deleted: boolean }>(`/landscape/${taskId}`, {
     method: "DELETE",
   });
-}
-
-// ---------------------------------------------------------------------------
-// Monitoring
-// ---------------------------------------------------------------------------
-
-export async function createMonitorTask(
-  req: CreateMonitorRequest,
-): Promise<MonitorTaskData> {
-  return request<MonitorTaskData>("/monitoring/tasks", {
-    method: "POST",
-    body: JSON.stringify(req),
-  });
-}
-
-export async function listMonitorTasks(): Promise<MonitorTaskData[]> {
-  return request<MonitorTaskData[]>("/monitoring/tasks", {
-    cache: "no-store",
-  });
-}
-
-export async function listBriefs(taskId: string): Promise<BriefData[]> {
-  return request<BriefData[]>(`/monitoring/tasks/${taskId}/briefs`, {
-    cache: "no-store",
-  });
-}
-
-export async function deleteMonitorTask(taskId: string): Promise<DeleteMonitorTaskData> {
-  return request<DeleteMonitorTaskData>(`/monitoring/tasks/${taskId}`, {
-    method: "DELETE",
-  });
-}
-
-export function monitoringStreamUrl(): string {
-  return "/api/v1/monitoring/stream";
 }
 
 // ---------------------------------------------------------------------------

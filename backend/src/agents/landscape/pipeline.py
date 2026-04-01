@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 
 from src.models.landscape import DynamicResearchLandscape
 
-from ..exploration.planner import generate_search_plan
+from .planner import generate_search_plan
 from .analyzer import analyze_landscape
 from .assembler import assemble_landscape
 from .graph_builder import build_collaboration_network

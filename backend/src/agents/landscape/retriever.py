@@ -13,7 +13,7 @@ import logging
 
 from src.models.paper import PaperResult, SearchResult, WebSearchResult
 
-from ..exploration.schemas import SearchPlan
+from .schemas import SearchPlan
 from ..tools import SemanticScholarClient, tavily_search
 from ..tools.s2_client import ENRICHED_FIELDS, _extract_author_details
 from .schemas import EnrichedPaper, EnrichedRetrievedData, S2AuthorDetail

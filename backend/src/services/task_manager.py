@@ -7,7 +7,6 @@ endpoints can ``await queue.get()`` without polling the database.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -15,7 +14,6 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from src.agents.exploration import ExplorationReport, run_exploration
 from src.agents.landscape import run_landscape_pipeline
 from src.models.db import TaskRecord, TaskStatus, get_engine
 from src.models.landscape import DynamicResearchLandscape
@@ -113,49 +111,6 @@ def update_task_progress(task_id: str, message: str) -> None:
 
 
 # ---- Background runner ----
-
-async def run_exploration_task(task_id: str, topic: str) -> None:
-    """Execute the exploration pipeline, persisting state to the DB.
-
-    Designed to be called via ``BackgroundTasks.add_task()``.
-    """
-    _update_fields(task_id, status=TaskStatus.running)
-    _publish(task_id, {"type": "status", "status": "running"})
-
-    async def _on_progress(msg: str) -> None:
-        update_task_progress(task_id, msg)
-
-    try:
-        report: ExplorationReport = await run_exploration(
-            topic, on_progress=_on_progress,
-        )
-        result_dict = report.model_dump(mode="json")
-
-        _update_fields(
-            task_id,
-            status=TaskStatus.completed,
-            progress_message="Exploration completed",
-            result=result_dict,
-        )
-        _publish(task_id, {
-            "type": "complete",
-            "status": "completed",
-            "result": result_dict,
-        })
-
-    except Exception:
-        logger.exception("Exploration task %s failed", task_id)
-        _update_fields(
-            task_id,
-            status=TaskStatus.failed,
-            progress_message="Task failed due to an internal error",
-        )
-        _publish(task_id, {
-            "type": "error",
-            "status": "failed",
-            "message": "Task failed due to an internal error",
-        })
-
 
 async def run_landscape_task(task_id: str, topic: str) -> None:
     """Execute the DRL landscape pipeline, persisting state to the DB.

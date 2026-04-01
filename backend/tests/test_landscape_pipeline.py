@@ -436,7 +436,7 @@ class TestRetriever:
             ),
         ):
             from src.agents.landscape.retriever import fetch_enriched_context
-            from src.agents.exploration.schemas import SearchPlan
+            from src.agents.landscape.schemas import SearchPlan
 
             plan = SearchPlan(
                 paper_keywords=["test"],
@@ -467,7 +467,7 @@ class TestPipeline:
     @pytest.mark.asyncio
     async def test_run_landscape_pipeline(self):
         """Pipeline produces a valid DynamicResearchLandscape."""
-        from src.agents.exploration.schemas import SearchPlan
+        from src.agents.landscape.schemas import SearchPlan
 
         mock_plan = SearchPlan(
             paper_keywords=["transformers"],
@@ -529,7 +529,7 @@ class TestPipeline:
     @pytest.mark.asyncio
     async def test_pipeline_with_graph_builder_integration(self):
         """Pipeline uses real graph_builder (not mocked) to build collab network."""
-        from src.agents.exploration.schemas import SearchPlan
+        from src.agents.landscape.schemas import SearchPlan
 
         mock_plan = SearchPlan(
             paper_keywords=["test"],

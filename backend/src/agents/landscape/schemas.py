@@ -15,6 +15,50 @@ from src.models.landscape import (
 from src.models.paper import PaperResult, WebSearchResult
 
 
+# ---------------------------------------------------------------------------
+# Search Plan (migrated from the former exploration module)
+# ---------------------------------------------------------------------------
+
+class SearchPlan(BaseModel):
+    """LLM-generated retrieval strategy produced by the Planner stage."""
+
+    paper_keywords: list[str] = Field(
+        ...,
+        min_length=1,
+        description="3-5 English academic keyword phrases for Semantic Scholar / arXiv.",
+    )
+    web_queries: list[str] = Field(
+        ...,
+        min_length=1,
+        description="2-3 trend / review questions for web search (Tavily).",
+    )
+    focus_areas: list[str] = Field(
+        ...,
+        min_length=1,
+        description="Research sub-directions to guide analysis.",
+    )
+    source_hints: list[str] = Field(
+        default_factory=list,
+        description=(
+            "2-4 paper source identifiers most relevant to the topic, "
+            "e.g. ['arxiv', 'pubmed', 'dblp']."
+        ),
+    )
+    domain_tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "1-2 domain labels classifying the topic, e.g. "
+            "['biomedical', 'computer_science']."
+        ),
+    )
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Planner's confidence in source_hints accuracy (0-1).",
+    )
+
+
 class S2AuthorDetail(BaseModel):
     """Structured author info extracted from the Semantic Scholar API."""
 
