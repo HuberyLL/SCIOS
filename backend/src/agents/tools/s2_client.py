@@ -30,6 +30,31 @@ DEFAULT_FIELDS = [
     "externalIds", "openAccessPdf",
 ]
 
+ENRICHED_FIELDS = [
+    *DEFAULT_FIELDS,
+    "authors.authorId",
+    "authors.affiliations",
+]
+
+
+def _extract_author_details(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract structured author info (id, name, affiliations) from an S2 paper.
+
+    Returns a list of dicts suitable for constructing ``S2AuthorDetail`` in the
+    landscape pipeline.  Works regardless of which ``fields`` were requested —
+    missing sub-fields gracefully default to empty values.
+    """
+    details: list[dict[str, Any]] = []
+    for a in raw.get("authors") or []:
+        if not isinstance(a, dict) or "name" not in a:
+            continue
+        details.append({
+            "author_id": a.get("authorId") or "",
+            "name": a["name"],
+            "affiliations": a.get("affiliations") or [],
+        })
+    return details
+
 
 def _paper_from_api(raw: dict[str, Any]) -> PaperResult:
     """Convert a Semantic Scholar API JSON object into a *PaperResult*."""
@@ -129,7 +154,7 @@ class SemanticScholarClient:
             params["minCitationCount"] = min_citation_count
         if publication_types:
             params["publicationTypes"] = ",".join(publication_types)
-        if open_access_pdf is not None:
+        if open_access_pdf:
             params["openAccessPdf"] = ""
         if fields_of_study:
             params["fieldsOfStudy"] = ",".join(fields_of_study)
@@ -241,3 +266,34 @@ class SemanticScholarClient:
             logger.error("S2 recommendations error: %s", exc)
             return []
         return [_paper_from_api(p) for p in (data.get("recommendedPapers") or [])]
+
+    async def get_papers_batch(
+        self,
+        paper_ids: list[str],
+        *,
+        fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch details for multiple papers via ``POST /paper/batch``.
+
+        Returns **raw** S2 JSON dicts (not ``PaperResult``) so callers can
+        extract enriched author info via ``_extract_author_details`` before
+        converting to ``PaperResult``.  Papers that the API cannot resolve
+        are silently omitted.
+        """
+        if not paper_ids:
+            return []
+        resolved_fields = fields or ENRICHED_FIELDS
+        params = {"fields": ",".join(resolved_fields)}
+        url = f"{BASE_URL}/paper/batch"
+        try:
+            data = await self._post(
+                url,
+                json_body={"ids": paper_ids},
+                params=params,
+            )
+        except Exception as exc:
+            logger.error("S2 batch lookup error: %s", exc)
+            return []
+        if isinstance(data, list):
+            return [item for item in data if item is not None]
+        return []
