@@ -16,7 +16,9 @@ from typing import Any
 from sqlmodel import Session, select
 
 from src.agents.exploration import ExplorationReport, run_exploration
+from src.agents.landscape import run_landscape_pipeline
 from src.models.db import TaskRecord, TaskStatus, get_engine
+from src.models.landscape import DynamicResearchLandscape
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +123,49 @@ async def run_exploration_task(task_id: str, topic: str) -> None:
 
     except Exception:
         logger.exception("Exploration task %s failed", task_id)
+        _update_fields(
+            task_id,
+            status=TaskStatus.failed,
+            progress_message="Task failed due to an internal error",
+        )
+        _publish(task_id, {
+            "type": "error",
+            "status": "failed",
+            "message": "Task failed due to an internal error",
+        })
+
+
+async def run_landscape_task(task_id: str, topic: str) -> None:
+    """Execute the DRL landscape pipeline, persisting state to the DB.
+
+    Designed to be called via ``BackgroundTasks.add_task()``.
+    """
+    _update_fields(task_id, status=TaskStatus.running)
+    _publish(task_id, {"type": "status", "status": "running"})
+
+    async def _on_progress(msg: str) -> None:
+        update_task_progress(task_id, msg)
+
+    try:
+        landscape: DynamicResearchLandscape = await run_landscape_pipeline(
+            topic, on_progress=_on_progress,
+        )
+        result_dict = landscape.model_dump(mode="json")
+
+        _update_fields(
+            task_id,
+            status=TaskStatus.completed,
+            progress_message="Landscape analysis completed",
+            result=result_dict,
+        )
+        _publish(task_id, {
+            "type": "complete",
+            "status": "completed",
+            "result": result_dict,
+        })
+
+    except Exception:
+        logger.exception("Landscape task %s failed", task_id)
         _update_fields(
             task_id,
             status=TaskStatus.failed,

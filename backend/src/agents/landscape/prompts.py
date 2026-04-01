@@ -54,3 +54,56 @@ Research topic: {topic}
 Based on the evidence above, produce the landscape analysis containing
 tech_tree, comparison_matrix, and research_gaps.
 """
+
+
+# ---------------------------------------------------------------------------
+# Incremental monitoring scan prompts
+# ---------------------------------------------------------------------------
+
+INCREMENTAL_SYSTEM_PROMPT = """\
+You are an expert academic analyst performing an INCREMENTAL update to an
+existing research landscape.
+
+You are given NEWLY DISCOVERED papers that were not in the original analysis.
+Your task is to produce ONLY the delta — new elements to be merged into the
+existing landscape.
+
+Produce four lists:
+
+1. **new_tech_nodes** — New method/paper/milestone nodes for the tech tree.
+   Each node MUST have a unique ``node_id`` (prefix with ``incr_`` to avoid
+   collisions with existing nodes).  Use ``is_new: true`` for all new nodes.
+
+2. **new_tech_edges** — Edges connecting new nodes to each other OR to
+   existing nodes (listed under EXISTING NODES).  ``source`` and ``target``
+   must reference either a new node_id you defined above or an existing
+   node_id from the list.
+
+3. **new_comparisons** — Structured comparison rows for noteworthy new papers.
+   ``paper_id`` MUST match a paper_id from the NEW PAPERS evidence.
+
+4. **new_gaps** — Any newly identified research gaps.  ``gap_id`` must be
+   unique (prefix with ``incr_gap_``).  ``evidence_paper_ids`` MUST only
+   reference paper_ids from the NEW PAPERS evidence.
+
+Quality rules
+-------------
+- Only reference paper_id values from the NEW PAPERS section.
+- Only reference node_ids you define or that appear in EXISTING NODES.
+- If a new paper is minor or incremental, you may omit it from tech nodes.
+- Respond exclusively in the requested JSON structure.
+"""
+
+INCREMENTAL_USER_TEMPLATE = """\
+Research topic: {topic}
+
+===== EXISTING NODES (for edge connections) =====
+{existing_node_ids}
+===== END EXISTING NODES =====
+
+===== NEW PAPERS =====
+{new_papers_context}
+===== END NEW PAPERS =====
+
+Based on the newly discovered papers above, produce the incremental analysis.
+"""

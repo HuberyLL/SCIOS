@@ -10,8 +10,12 @@ from pydantic import BaseModel, Field
 
 from src.models.landscape import (
     ComparisonMatrix,
+    PaperComparison,
+    ResearchGap,
     ResearchGaps,
     TechTree,
+    TechTreeEdge,
+    TechTreeNode,
 )
 from src.models.paper import PaperResult, WebSearchResult
 
@@ -50,3 +54,16 @@ class LandscapeAnalysis(BaseModel):
     tech_tree: TechTree
     comparison_matrix: ComparisonMatrix
     research_gaps: ResearchGaps
+
+
+class IncrementalAnalysis(BaseModel):
+    """Mini-LLM output for incremental monitoring scan.
+
+    Produces only the delta: new tech tree nodes/edges, comparisons,
+    and research gaps discovered from newly found papers.
+    """
+
+    new_tech_nodes: list[TechTreeNode] = Field(default_factory=list)
+    new_tech_edges: list[TechTreeEdge] = Field(default_factory=list)
+    new_comparisons: list[PaperComparison] = Field(default_factory=list)
+    new_gaps: list[ResearchGap] = Field(default_factory=list)

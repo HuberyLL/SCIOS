@@ -16,7 +16,7 @@ from sqlmodel import SQLModel
 
 from src.api.v1.assistant import router as assistant_router
 from src.api.v1.exploration import router as exploration_router
-from src.api.v1.monitoring import router as monitoring_router
+from src.api.v1.landscape import router as landscape_router
 from src.models.db import get_engine
 from src.services.scheduler import shutdown_scheduler, start_scheduler
 
@@ -51,5 +51,5 @@ app.add_middleware(
 )
 
 app.include_router(exploration_router)
-app.include_router(monitoring_router)
+app.include_router(landscape_router)
 app.include_router(assistant_router)

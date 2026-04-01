@@ -2,10 +2,7 @@ import type {
   ApiResponse,
   AssistantMessageOut,
   AssistantSession,
-  BriefData,
-  CreateMonitorRequest,
-  DeleteMonitorTaskData,
-  MonitorTaskData,
+  LandscapeTaskStatus,
   TaskStatusData,
 } from "@/types";
 
@@ -62,38 +59,94 @@ export function explorationStreamUrl(taskId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Monitoring
+// Landscape
 // ---------------------------------------------------------------------------
 
-export async function createMonitorTask(
-  req: CreateMonitorRequest,
-): Promise<MonitorTaskData> {
-  return request<MonitorTaskData>("/monitoring/tasks", {
+export async function startLandscape(
+  topic: string,
+): Promise<{ task_id: string }> {
+  return request<{ task_id: string }>("/landscape/start", {
     method: "POST",
-    body: JSON.stringify(req),
+    body: JSON.stringify({ topic }),
   });
 }
 
-export async function listMonitorTasks(): Promise<MonitorTaskData[]> {
-  return request<MonitorTaskData[]>("/monitoring/tasks", {
-    cache: "no-store",
+export async function getLandscapeStatus(
+  taskId: string,
+): Promise<LandscapeTaskStatus> {
+  return request<LandscapeTaskStatus>(`/landscape/${taskId}/status`);
+}
+
+export function landscapeStreamUrl(taskId: string): string {
+  return `/api/v1/landscape/${taskId}/stream`;
+}
+
+// ---------------------------------------------------------------------------
+// Landscape subscription (incremental monitoring)
+// ---------------------------------------------------------------------------
+
+export interface SubscriptionData {
+  id: string;
+  topic: string;
+  frequency: string;
+  is_active: boolean;
+  last_run_at: string | null;
+  created_at: string;
+}
+
+export interface SubscriptionCheckResult {
+  subscribed: boolean;
+  data: SubscriptionData | null;
+}
+
+export interface IncrementEntry {
+  id: string;
+  task_id: string;
+  increment: import("@/types").LandscapeIncrement;
+  created_at: string;
+}
+
+export async function subscribeLandscape(
+  topic: string,
+  frequency: string = "daily",
+): Promise<SubscriptionData> {
+  return request<SubscriptionData>("/landscape/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ topic, frequency }),
   });
 }
 
-export async function listBriefs(taskId: string): Promise<BriefData[]> {
-  return request<BriefData[]>(`/monitoring/tasks/${taskId}/briefs`, {
-    cache: "no-store",
-  });
+export async function getSubscription(
+  topic: string,
+): Promise<SubscriptionCheckResult> {
+  const res = await fetch(
+    `/api/v1/landscape/subscription?topic=${encodeURIComponent(topic)}`,
+    { cache: "no-store", headers: { "Content-Type": "application/json" } },
+  );
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
+  return res.json() as Promise<SubscriptionCheckResult>;
 }
 
-export async function deleteMonitorTask(taskId: string): Promise<DeleteMonitorTaskData> {
-  return request<DeleteMonitorTaskData>(`/monitoring/tasks/${taskId}`, {
-    method: "DELETE",
-  });
+export async function unsubscribeLandscape(
+  taskId: string,
+): Promise<{ id: string; deleted: boolean }> {
+  return request<{ id: string; deleted: boolean }>(
+    `/landscape/subscribe/${taskId}`,
+    { method: "DELETE" },
+  );
 }
 
-export function monitoringStreamUrl(): string {
-  return "/api/v1/monitoring/stream";
+export async function getLandscapeIncrements(
+  topic: string,
+  since?: string,
+): Promise<IncrementEntry[]> {
+  let path = `/landscape/increments?topic=${encodeURIComponent(topic)}`;
+  if (since) path += `&since=${encodeURIComponent(since)}`;
+  return request<IncrementEntry[]>(path, { cache: "no-store" });
+}
+
+export function landscapeMonitorStreamUrl(): string {
+  return "/api/v1/landscape/monitor-stream";
 }
 
 // ---------------------------------------------------------------------------
