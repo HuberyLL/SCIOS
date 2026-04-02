@@ -41,6 +41,7 @@ export interface ScholarNode {
   affiliations: string[];
   paper_count: number;
   citation_count: number;
+  h_index: number;
   top_paper_ids: string[];
   is_new: boolean;
 }

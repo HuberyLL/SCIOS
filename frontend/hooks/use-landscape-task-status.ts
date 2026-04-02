@@ -164,6 +164,7 @@ export function useLandscapeTaskStatus(
         if (cancelled) return;
         setState((prev) => ({
           ...prev,
+          status: "completed",
           landscape: res.result,
           loading: false,
           progressPct: 100,

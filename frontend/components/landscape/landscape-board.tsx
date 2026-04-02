@@ -14,7 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ResearchGapsView } from "./research-gaps-view";
 import { PaperDetailPanel } from "./paper-detail-panel";
-import type { DynamicResearchLandscape, PaperResult } from "@/types";
+import { ScholarDetailPanel } from "./scholar-detail-panel";
+import type { DynamicResearchLandscape, PaperResult, ScholarNode } from "@/types";
 
 const TechTreeView = dynamic(
   () => import("./tech-tree-view").then((m) => ({ default: m.TechTreeView })),
@@ -36,6 +37,7 @@ const fadeUp = {
 
 export function LandscapeBoard({ landscape }: LandscapeBoardProps) {
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
+  const [selectedScholar, setSelectedScholar] = useState<ScholarNode | null>(null);
 
   const paperMap = useMemo(() => {
     const map = new Map<string, PaperResult>();
@@ -51,10 +53,17 @@ export function LandscapeBoard({ landscape }: LandscapeBoardProps) {
     setSelectedPaperId(paperId);
   }, []);
 
-  const handleScholarClick = useCallback((paperIds: string[]) => {
-    if (paperIds.length > 0) {
-      setSelectedPaperId(paperIds[0]);
-    }
+  const handleScholarClick = useCallback((scholar: ScholarNode) => {
+    setSelectedScholar(scholar);
+  }, []);
+
+  const handleCloseScholar = useCallback(() => {
+    setSelectedScholar(null);
+  }, []);
+
+  const handleScholarPaperClick = useCallback((paperId: string) => {
+    setSelectedScholar(null);
+    setSelectedPaperId(paperId);
   }, []);
 
   const handleClosePaper = useCallback(() => {
@@ -142,6 +151,7 @@ export function LandscapeBoard({ landscape }: LandscapeBoardProps) {
         <TabsContent value="collaboration" className="mt-3 flex-1">
           <CollaborationGraph
             data={collaboration_network}
+            paperMap={paperMap}
             onScholarClick={handleScholarClick}
           />
         </TabsContent>
@@ -150,6 +160,15 @@ export function LandscapeBoard({ landscape }: LandscapeBoardProps) {
           <ResearchGapsView data={research_gaps} onPaperClick={handlePaperClick} />
         </TabsContent>
       </Tabs>
+
+      {/* Scholar detail side panel */}
+      <ScholarDetailPanel
+        scholar={selectedScholar}
+        paperMap={paperMap}
+        open={selectedScholar !== null}
+        onClose={handleCloseScholar}
+        onPaperClick={handleScholarPaperClick}
+      />
 
       {/* Paper detail side panel */}
       <PaperDetailPanel
