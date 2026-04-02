@@ -15,6 +15,7 @@ import logging
 from collections import defaultdict
 from itertools import combinations
 
+from src.core.config import get_settings
 from src.models.landscape import (
     CollaborationEdge,
     CollaborationNetwork,
@@ -23,6 +24,7 @@ from src.models.landscape import (
 from src.models.paper import PaperResult
 
 from ...tools import SemanticScholarClient
+from ..evaluation import ScholarScore, filter_scholars, score_scholars
 from ..schemas import AuthorProfile, PaperCorpus
 from .base import BaseAgent, ProgressCallback
 
@@ -86,6 +88,15 @@ class NetworkAgent(BaseAgent[PaperCorpus, CollaborationNetwork]):
             candidates = self._identify_top_authors(corpus, threshold_divisor=2)
             profiles = await self._fetch_profiles(candidates)
             self._logger.info("Retry: %d profiles from %d candidates", len(profiles), len(candidates))
+
+        # Step 2++: Scholar scoring & filtering
+        await self._notify(on_progress, "scoring and filtering scholars …")
+        profiles = self._score_and_filter_scholars(profiles, corpus)
+        self._logger.info("After scholar scoring: %d profiles retained", len(profiles))
+
+        if not profiles:
+            self._logger.warning("All scholars filtered out — using co-authorship fallback")
+            return self._coauthorship_fallback(corpus)
 
         # Step 3: Fetch papers for each author to expand co-authorship data
         await self._notify(on_progress, "fetching author paper histories …")
@@ -180,6 +191,55 @@ class NetworkAgent(BaseAgent[PaperCorpus, CollaborationNetwork]):
         )
 
         return candidates
+
+    # ------------------------------------------------------------------
+    # Step 1+: Scholar scoring
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _score_and_filter_scholars(
+        profiles: list[AuthorProfile],
+        corpus: PaperCorpus,
+    ) -> list[AuthorProfile]:
+        """Score profiles via the evaluation module and apply hard filters.
+
+        Returns the filtered list of AuthorProfile objects (order preserved
+        by composite score descending).
+        """
+        author_corpus_count: dict[str, int] = defaultdict(int)
+        author_latest_year: dict[str, int] = defaultdict(int)
+        for p in corpus.papers:
+            year = 0
+            if p.published_date:
+                try:
+                    year = int(p.published_date[:4])
+                except (ValueError, IndexError):
+                    pass
+            for idx, _ in enumerate(p.authors):
+                aid = p.author_ids[idx] if idx < len(p.author_ids) else ""
+                if aid:
+                    author_corpus_count[aid] += 1
+                    if year > author_latest_year[aid]:
+                        author_latest_year[aid] = year
+
+        candidates_raw: list[dict] = []
+        for prof in profiles:
+            candidates_raw.append({
+                "author_id": prof.author_id,
+                "name": prof.name,
+                "h_index": prof.h_index,
+                "citation_count": prof.citation_count,
+                "paper_count": prof.paper_count,
+                "corpus_paper_count": author_corpus_count.get(prof.author_id, 0),
+                "latest_year": author_latest_year.get(prof.author_id, 0) or None,
+            })
+
+        scored = score_scholars(candidates_raw)
+        filtered = filter_scholars(scored, candidates_raw)
+
+        kept_ids = {s.author_id for s in filtered}
+        profile_map = {p.author_id: p for p in profiles}
+        return [profile_map[s.author_id] for s in filtered if s.author_id in profile_map]
 
     # ------------------------------------------------------------------
     # Step 2
@@ -350,6 +410,7 @@ class NetworkAgent(BaseAgent[PaperCorpus, CollaborationNetwork]):
                 affiliations=prof.affiliations,
                 paper_count=prof.paper_count,
                 citation_count=prof.citation_count,
+                h_index=prof.h_index,
                 top_paper_ids=[pid for pid, _ in top_papers[:10]],
             ))
 

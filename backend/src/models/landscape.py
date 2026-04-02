@@ -100,6 +100,7 @@ class ScholarNode(BaseModel):
     )
     paper_count: int = Field(default=0, description="Number of papers in the analysed corpus.")
     citation_count: int = Field(default=0, description="Total citations within the analysed corpus.")
+    h_index: int = Field(default=0, description="h-index from Semantic Scholar.")
     top_paper_ids: list[str] = Field(
         default_factory=list,
         description="PaperResult.paper_id values for representative works.",

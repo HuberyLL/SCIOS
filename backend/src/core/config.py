@@ -76,6 +76,32 @@ class Settings(BaseSettings):
     landscape_gap_branch_concurrency: int = 3
     landscape_map_concurrency: int = 3
 
+    # -- Landscape evaluation / filtering ------------------------------------
+    # Paper scoring weights (must sum to 1.0)
+    eval_weight_citation: float = 0.35
+    eval_weight_influential: float = 0.15
+    eval_weight_venue: float = 0.20
+    eval_weight_recency: float = 0.10
+    eval_weight_structural: float = 0.20
+
+    eval_tier1_pct: float = 0.15
+    eval_tier2_pct: float = 0.50
+
+    eval_budget_narrow: int = 150
+    eval_budget_medium: int = 300
+    eval_budget_broad: int = 500
+
+    # Scholar filtering thresholds
+    scholar_min_h_index: int = 5
+    scholar_min_corpus_papers: int = 2
+    scholar_top_k: int = 50
+
+    # Scholar scoring weights (must sum to 1.0)
+    scholar_weight_h_index: float = 0.30
+    scholar_weight_relevance: float = 0.30
+    scholar_weight_citation: float = 0.25
+    scholar_weight_activity: float = 0.15
+
     # -- Landscape memory / caching -----------------------------------------
     cache_dir: str = "../data/cache"
     s2_cache_enabled: bool = True

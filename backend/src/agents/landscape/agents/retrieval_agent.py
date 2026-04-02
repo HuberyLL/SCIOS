@@ -147,9 +147,47 @@ class RetrievalAgent(BaseAgent[ScopeDefinition, PaperCorpus]):
         if len(paper_map) < MIN_VIABLE_CORPUS:
             quality_flags.append("small_corpus")
 
+        # -- Phase E: Corpus Refinement (evaluation-based pruning) --
+        pre_refinement_count = len(paper_map)
+        await self._notify(on_progress, "Phase E — scoring and refining corpus …")
+        paper_list, score_stats = self._refine_corpus(
+            list(paper_map.values()),
+            dict(citation_graph),
+            dict(reference_graph),
+            seed_ids=set(seed_map.values()),
+            complexity=scope.estimated_complexity,
+        )
+        paper_map = {p.paper_id: p for p in paper_list}
+        self._logger.info(
+            "Phase E: corpus %d -> %d after refinement",
+            pre_refinement_count, len(paper_map),
+        )
+
+        # Synchronise all graph/mapping structures with the pruned corpus
+        kept_ids = set(paper_map.keys())
+        citation_graph = {
+            pid: [ref for ref in refs if ref in kept_ids]
+            for pid, refs in citation_graph.items()
+            if pid in kept_ids
+        }
+        reference_graph = {
+            pid: [ref for ref in refs if ref in kept_ids]
+            for pid, refs in reference_graph.items()
+            if pid in kept_ids
+        }
+        sub_field_mapping = {
+            name: [pid for pid in pids if pid in kept_ids]
+            for name, pids in sub_field_mapping.items()
+        }
+        sub_field_mapping = {k: v for k, v in sub_field_mapping.items() if v}
+
         # -- Build output --
         stats = self._compute_stats(scope, paper_map, seed_map, sub_field_mapping)
         stats.quality_flags = quality_flags
+        stats.pre_refinement_count = pre_refinement_count
+        stats.score_median = score_stats.get("score_median", 0.0)
+        stats.score_mean = score_stats.get("score_mean", 0.0)
+        stats.tier_distribution = score_stats.get("tier_distribution", {})
         corpus = PaperCorpus(
             papers=list(paper_map.values()),
             seed_paper_map=seed_map,
@@ -160,6 +198,36 @@ class RetrievalAgent(BaseAgent[ScopeDefinition, PaperCorpus]):
             stats=stats,
         )
         return corpus
+
+    # ------------------------------------------------------------------
+    # Phase E: Corpus Refinement
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _refine_corpus(
+        papers: list[PaperResult],
+        citation_graph: dict[str, list[str]],
+        reference_graph: dict[str, list[str]],
+        *,
+        seed_ids: set[str],
+        complexity: str,
+    ) -> tuple[list[PaperResult], dict]:
+        """Score, tier, and budget-prune the corpus."""
+        from ..evaluation import (
+            apply_budget,
+            compute_score_stats,
+            score_papers,
+            tier_papers,
+        )
+
+        scores = score_papers(
+            papers, citation_graph, reference_graph,
+            seed_paper_ids=seed_ids,
+        )
+        scores = tier_papers(scores)
+        stats = compute_score_stats(scores)
+        pruned = apply_budget(papers, scores, complexity)  # type: ignore[arg-type]
+        return pruned, stats
 
     # ------------------------------------------------------------------
     # Phase A: Seed anchoring

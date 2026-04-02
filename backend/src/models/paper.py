@@ -33,6 +33,11 @@ class PaperResult(BaseModel):
     source: str = ""
     categories: list[str] = Field(default_factory=list)
     citation_count: int = 0
+    influential_citation_count: int = 0
+    reference_count: int = 0
+    venue: str = ""
+    venue_type: str = ""
+    fields_of_study: list[str] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):

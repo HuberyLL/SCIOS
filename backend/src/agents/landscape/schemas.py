@@ -137,6 +137,13 @@ class CorpusStats(BaseModel):
             "E.g. 'low_seed_coverage', 'small_corpus', 'supplement_failed'."
         ),
     )
+    score_median: float = Field(default=0.0, description="Median composite paper score.")
+    score_mean: float = Field(default=0.0, description="Mean composite paper score.")
+    tier_distribution: dict[str, int] = Field(
+        default_factory=dict,
+        description="Tier label -> paper count, e.g. {'tier1': 100, 'tier2': 200}.",
+    )
+    pre_refinement_count: int = Field(default=0, description="Corpus size before refinement.")
 
 
 class PaperCorpus(BaseModel):

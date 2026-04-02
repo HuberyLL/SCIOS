@@ -26,7 +26,11 @@ _RATE_RULES: dict[str, tuple[int, float]] = {
 
 DEFAULT_FIELDS = [
     "paperId", "title", "abstract", "year",
-    "citationCount", "authors", "url",
+    "citationCount", "influentialCitationCount",
+    "referenceCount",
+    "publicationVenue",
+    "s2FieldsOfStudy",
+    "authors", "url",
     "externalIds", "openAccessPdf",
 ]
 
@@ -73,6 +77,19 @@ def _paper_from_api(raw: dict[str, Any]) -> PaperResult:
     open_pdf = raw.get("openAccessPdf") or {}
     pdf_url = open_pdf.get("url", "") if isinstance(open_pdf, dict) else ""
 
+    venue_obj = raw.get("publicationVenue") or {}
+    venue_name = ""
+    venue_type = ""
+    if isinstance(venue_obj, dict):
+        venue_name = venue_obj.get("name") or ""
+        venue_type = venue_obj.get("type") or ""
+
+    fos_raw = raw.get("s2FieldsOfStudy") or []
+    fos_list: list[str] = []
+    for entry in fos_raw:
+        if isinstance(entry, dict) and entry.get("category"):
+            fos_list.append(entry["category"])
+
     return PaperResult(
         paper_id=raw.get("paperId", ""),
         title=raw.get("title", ""),
@@ -86,6 +103,11 @@ def _paper_from_api(raw: dict[str, Any]) -> PaperResult:
         source="semantic_scholar",
         categories=[],
         citation_count=raw.get("citationCount", 0) or 0,
+        influential_citation_count=raw.get("influentialCitationCount", 0) or 0,
+        reference_count=raw.get("referenceCount", 0) or 0,
+        venue=venue_name,
+        venue_type=venue_type,
+        fields_of_study=fos_list,
     )
 
 
