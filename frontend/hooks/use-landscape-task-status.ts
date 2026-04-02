@@ -64,6 +64,42 @@ interface InternalState {
 
 const POLL_INTERVAL = 2_500;
 
+function applyProgressEvent(
+  prev: InternalState,
+  data: LandscapeSSEEvent & { type: "progress" },
+): InternalState {
+  const stageId = data.stage_id;
+  const stageStatus = (data.status ?? "running") as PipelineStage["status"];
+  const pct = data.progress_pct ?? prev.progressPct;
+  const newMessages = [...prev.messages, data.message];
+
+  if (!stageId) {
+    return {
+      ...prev,
+      messages: newMessages,
+      progressPct: Math.max(prev.progressPct, pct),
+    };
+  }
+
+  const newStages = prev.stages.map((s) => {
+    if (s.id !== stageId) return s;
+    return {
+      ...s,
+      status: stageStatus,
+      elapsed_s: data.elapsed_s ?? s.elapsed_s,
+      detail: data.detail ?? s.detail,
+      messages: [...s.messages, data.message],
+    };
+  });
+
+  return {
+    ...prev,
+    messages: newMessages,
+    stages: newStages,
+    progressPct: Math.max(prev.progressPct, pct),
+  };
+}
+
 function initialStateFor(task: LandscapeTaskListItem | null): InternalState {
   if (!task) {
     return {
@@ -162,37 +198,7 @@ export function useLandscapeTaskStatus(
 
         switch (data.type) {
           case "progress": {
-            const stageId = data.stage_id;
-            const stageStatus = (data.status ?? "running") as PipelineStage["status"];
-            const pct = data.progress_pct ?? 0;
-
-            setState((prev) => {
-              const newMessages = [...prev.messages, data.message];
-
-              if (!stageId) {
-                return { ...prev, messages: newMessages };
-              }
-
-              const newStages = prev.stages.map((s) => {
-                if (s.id === stageId) {
-                  return {
-                    ...s,
-                    status: stageStatus,
-                    elapsed_s: data.elapsed_s ?? s.elapsed_s,
-                    detail: data.detail ?? s.detail,
-                    messages: [...s.messages, data.message],
-                  };
-                }
-                return s;
-              });
-
-              return {
-                ...prev,
-                messages: newMessages,
-                stages: newStages,
-                progressPct: Math.max(prev.progressPct, pct),
-              };
-            });
+            setState((prev) => applyProgressEvent(prev, data));
             break;
           }
           case "status":
@@ -262,6 +268,40 @@ export function useLandscapeTaskStatus(
           es.close();
           onStatusChangeRef.current?.();
           return;
+        }
+        if (res.status === "running" || res.status === "pending") {
+          setState((prev) => {
+            let next = {
+              ...prev,
+              status: res.status,
+              progressPct: Math.max(
+                prev.progressPct,
+                res.current_progress_pct ?? prev.progressPct,
+              ),
+            };
+
+            const snapshot = res.progress_snapshot ?? {};
+            const events = Object.values(snapshot).filter(
+              (e): e is LandscapeSSEEvent & { type: "progress" } =>
+                !!e && typeof e === "object" && e.type === "progress" && typeof e.message === "string",
+            );
+            events.sort((a, b) => {
+              const ai = a.stage_index ?? 999;
+              const bi = b.stage_index ?? 999;
+              if (ai !== bi) return ai - bi;
+              const ap = a.progress_pct ?? 0;
+              const bp = b.progress_pct ?? 0;
+              return ap - bp;
+            });
+
+            const seen = new Set(next.messages);
+            for (const ev of events) {
+              if (seen.has(ev.message)) continue;
+              next = applyProgressEvent(next, ev);
+              seen.add(ev.message);
+            }
+            return next;
+          });
         }
         if (res.status === "failed") {
           setState((prev) => ({

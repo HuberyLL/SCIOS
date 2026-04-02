@@ -147,6 +147,9 @@ export interface LandscapeTaskStatus {
   task_id: string;
   status: TaskStatus;
   progress_message: string;
+  current_stage_id?: StageId | "";
+  current_progress_pct?: number;
+  progress_snapshot?: Record<string, LandscapeSSEEvent>;
   result: DynamicResearchLandscape | null;
 }
 

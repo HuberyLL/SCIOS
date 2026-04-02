@@ -40,6 +40,14 @@ class TaskRecord(SQLModel, table=True):
         default=None, sa_column=Column(JSON),
         description="Latest structured progress event for SSE catch-up on reconnect.",
     )
+    current_stage_id: str = Field(
+        default="",
+        description="Last reported stage_id from structured progress events.",
+    )
+    current_progress_pct: int = Field(
+        default=0,
+        description="Last reported overall pipeline progress percentage (0-100).",
+    )
     result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -117,6 +125,22 @@ def apply_lightweight_migrations(engine) -> None:
             )
             logger.info(
                 "Applied lightweight DB migration: added task_records.progress_snapshot",
+            )
+
+        if "current_stage_id" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE task_records ADD COLUMN current_stage_id TEXT DEFAULT ''",
+            )
+            logger.info(
+                "Applied lightweight DB migration: added task_records.current_stage_id",
+            )
+
+        if "current_progress_pct" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE task_records ADD COLUMN current_progress_pct INTEGER DEFAULT 0",
+            )
+            logger.info(
+                "Applied lightweight DB migration: added task_records.current_progress_pct",
             )
 
 

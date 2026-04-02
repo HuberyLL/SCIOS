@@ -38,6 +38,9 @@ class TaskStatusData(BaseModel):
     task_id: str
     status: TaskStatus
     progress_message: str
+    current_stage_id: str = ""
+    current_progress_pct: int = 0
+    progress_snapshot: dict[str, dict[str, Any]] = Field(default_factory=dict)
     result: dict[str, Any] | None = None
 
 
@@ -140,6 +143,9 @@ async def get_status(task_id: str) -> TaskStatusResponse:
             task_id=record.id,
             status=record.status,
             progress_message=record.progress_message,
+            current_stage_id=record.current_stage_id,
+            current_progress_pct=record.current_progress_pct,
+            progress_snapshot=task_manager._coerce_snapshot(record.progress_snapshot),
             result=record.result,
         )
     )
@@ -175,9 +181,19 @@ async def stream_status(task_id: str) -> StreamingResponse:
             yield _sse_line({"type": "status", "status": record.status.value})
 
             # Replay accumulated stage events so the stepper can reconstruct
-            snapshot: dict[str, Any] = record.progress_snapshot or {}
+            snapshot: dict[str, dict[str, Any]] = task_manager._coerce_snapshot(
+                record.progress_snapshot,
+            )
             if snapshot:
-                for _stage_id, stage_event in snapshot.items():
+                stage_events = list(snapshot.values())
+                stage_events.sort(
+                    key=lambda e: (
+                        int(e.get("stage_index") or 999),
+                        int(e.get("progress_pct") or 0),
+                        str(e.get("stage_id") or ""),
+                    ),
+                )
+                for stage_event in stage_events:
                     yield _sse_line(stage_event)
             elif record.progress_message:
                 yield _sse_line({
