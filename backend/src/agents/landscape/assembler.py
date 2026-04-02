@@ -42,6 +42,7 @@ def assemble_landscape(
     collaboration_network: CollaborationNetwork,
     research_gaps: ResearchGaps,
     quality: str = "complete",
+    base_version: int = 0,
 ) -> DynamicResearchLandscape:
     """Combine all pipeline outputs into the final ``DynamicResearchLandscape``.
 
@@ -96,7 +97,7 @@ def assemble_landscape(
         topic=topic,
         generated_at=datetime.now(timezone.utc),
         paper_count=len(papers),
-        version=1,
+        version=base_version + 1,
         quality=quality,  # type: ignore[arg-type]
     )
 

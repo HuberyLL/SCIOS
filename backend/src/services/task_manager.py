@@ -125,7 +125,7 @@ async def run_landscape_task(task_id: str, topic: str) -> None:
 
     try:
         landscape: DynamicResearchLandscape = await run_landscape_pipeline(
-            topic, on_progress=_on_progress,
+            topic, task_id=task_id, on_progress=_on_progress,
         )
         result_dict = landscape.model_dump(mode="json")
 

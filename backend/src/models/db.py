@@ -39,6 +39,38 @@ class TaskRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class PipelineCheckpoint(SQLModel, table=True):
+    """Stores intermediate stage outputs so the pipeline can resume after a crash."""
+
+    __tablename__ = "pipeline_checkpoints"
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    task_id: str = Field(index=True)
+    stage: str  # "scope", "retrieval", "taxonomy", "network", "gaps"
+    data_json: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class TopicSnapshot(SQLModel, table=True):
+    """Lightweight index for cross-run topic memory (Layer 3).
+
+    Full paper data lives in the linked ``TaskRecord.result``; this table
+    only keeps lightweight metadata for quick lookup and warm-start decisions.
+    """
+
+    __tablename__ = "topic_snapshots"
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    topic_normalized: str = Field(index=True)
+    topic_original: str = ""
+    scope_json: str = ""
+    corpus_stats_json: str = ""
+    landscape_task_id: str = ""
+    paper_count: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 def get_engine():
     """Return the singleton SQLite engine, creating the data directory if needed."""
     global _engine

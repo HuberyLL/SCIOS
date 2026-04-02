@@ -272,3 +272,10 @@ class LandscapeIncrement(BaseModel):
     new_collab_edges: list[CollaborationEdge] = Field(default_factory=list)
     new_gaps: list[ResearchGap] = Field(default_factory=list)
     detected_at: datetime | None = Field(default=None, description="Timestamp of detection.")
+
+    @property
+    def is_empty(self) -> bool:
+        return not (
+            self.new_papers or self.new_tech_nodes or self.new_tech_edges
+            or self.new_scholars or self.new_collab_edges or self.new_gaps
+        )

@@ -97,11 +97,14 @@ class SemanticScholarClient:
     - Automatic retry with exponential back-off on 429 / 5xx / timeouts
       via the shared ``api_retry`` decorator.
     - Optional API key authentication; falls back to unauthenticated access.
+    - Transparent file-based caching via ``S2Cache`` (Layer 1 memory).
     """
 
     def __init__(self, api_key: str | None = None) -> None:
         self._api_key = api_key or get_settings().semantic_scholar_api_key
         self._limiter = RateLimiter(rules=_RATE_RULES)
+        from src.agents.landscape.memory.s2_cache import S2Cache
+        self._cache = S2Cache()
 
     def _headers(self) -> dict[str, str]:
         if self._api_key:
@@ -115,21 +118,31 @@ class SemanticScholarClient:
 
     @api_retry
     async def _get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict:
+        cached = self._cache.get(endpoint, params=params)
+        if cached is not None:
+            return cached
         await self._limiter.acquire(endpoint)
         async with managed_client(headers=self._headers()) as client:
             url = f"{BASE_URL}{endpoint}"
             resp = await client.get(url, params=params)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+        self._cache.put(endpoint, data, params=params)
+        return data
 
     @api_retry
     async def _post(self, url: str, json_body: dict[str, Any], params: dict[str, Any] | None = None) -> dict:
         endpoint = url.replace(BASE_URL, "").replace(RECO_URL, "")
+        cached = self._cache.get(endpoint, params=params, body=json_body)
+        if cached is not None:
+            return cached
         await self._limiter.acquire(endpoint)
         async with managed_client(headers=self._headers()) as client:
             resp = await client.post(url, json=json_body, params=params)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+        self._cache.put(endpoint, data, params=params, body=json_body)
+        return data
 
     # ------------------------------------------------------------------
     # Public API

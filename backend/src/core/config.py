@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     # -- Synthesizer --------------------------------------------------------
     synthesizer_max_papers: int = 40
 
+    # -- Landscape memory / caching -----------------------------------------
+    cache_dir: str = "../data/cache"
+    s2_cache_enabled: bool = True
+    s2_cache_max_mb: int = 500
+    topic_cache_max_age_days: int = 7
+    topic_warm_start_max_age_days: int = 30
+
 
 
 @lru_cache(maxsize=1)
