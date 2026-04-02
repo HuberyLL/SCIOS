@@ -7,7 +7,11 @@
 ## 🌟 Features
 
 - **Dynamic Research Landscape**
-  Build a structured, visual research workspace for a topic: technology evolution paths, scholar collaboration network, core evidence papers, and research gaps. Tasks are managed in a unified left-sidebar workspace.
+  Build a structured, visual research workspace for a topic through three core modules:
+  1) **Tech Tree** (technology evolution paths),
+  2) **Collaboration Network** (scholar groups and co-author relationships),
+  3) **Research Gaps** (evidence-grounded open problems and opportunities).
+  Tasks are managed in a unified left-sidebar workspace.
 
 - **Interactive Academic Assistant**
   A powerful AI agent equipped with a local sandbox workspace. It can help you search for literature, analyze experimental data, and even write and compile LaTeX documents autonomously.
@@ -17,7 +21,20 @@
 ### Landscape Workspace
 Create and manage landscape tasks in a sidebar, then inspect each task's visual analysis in the main panel.
 
-![Landscape workspace screenshot](docs/assets/explore.png)
+### Tech Tree
+Visualize methodology evolution, key milestones, and branch structures over time.
+
+![Tech Tree screenshot](docs/assets/techtree.png)
+
+### Collaboration Network
+Inspect active scholars, collaboration strength, and major research groups in the topic.
+
+![Collaboration Network screenshot](docs/assets/collaboration.png)
+
+### Research Gaps
+Surface high-value open questions with evidence papers and suggested research directions.
+
+![Research Gaps screenshot](docs/assets/gaps.png)
 
 ### Assistant Mode
 Use the interactive assistant to search papers, edit LaTeX files, and compile PDFs directly in the local workspace.
@@ -38,10 +55,10 @@ The Interactive Assistant is equipped with a variety of powerful tools to perfor
 
 ## 📚 Supported Academic Sources
 
-SCIOS currently uses a focused source strategy for landscape generation:
+SCIOS currently uses a focused source strategy:
 
-- **Semantic Scholar** (primary academic source for papers, citations, authors)
-- **Tavily Web Search** (supplementary web context for trend signals)
+- **Landscape pipeline**: **Semantic Scholar only** (papers, citations, authors, and scholar profiles)
+- **Assistant tools**: **Semantic Scholar + Tavily Web Search** (tool-augmented exploration and web context lookup)
 
 ---
 
@@ -72,7 +89,9 @@ You must configure the API keys in your `.env` file for SCIOS to function proper
 - `LLM_BASE_URL`: API base URL. Keep the default for OpenAI; set it for OpenAI-compatible providers.
 - `LLM_MODEL`: Model name in LiteLLM format.
 - `TAVILY_API_KEY`: API key for Tavily Web Search.
-- *(Optional)* Keep additional source-related variables for future experimentation, but core landscape flow only requires Semantic Scholar + Tavily.
+- *(Optional)* Keep additional source-related variables for future experimentation. Current core flow uses:
+  - Landscape: Semantic Scholar
+  - Assistant: Semantic Scholar + Tavily
 
 ##### Multi-model provider examples (via LiteLLM)
 
