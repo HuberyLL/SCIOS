@@ -42,17 +42,9 @@ class Settings(BaseSettings):
 
     # -- Multi-source paper search ------------------------------------------
     core_api_key: str = ""
-    unpaywall_email: str = ""
     doaj_api_key: str = ""
     crossref_mailto: str = ""
     openalex_mailto: str = ""
-
-    # -- Source routing (Planner-hints-first) --------------------------------
-    source_routing_enabled: bool = True
-    source_routing_confidence_threshold: float = 0.6
-    source_routing_max_sources: int = 3
-    source_routing_stage_b_enabled: bool = True
-    source_routing_min_papers_stage_b: int = 5
 
     # -- Assistant mode ------------------------------------------------------
     assistant_model: str = ""
@@ -62,9 +54,6 @@ class Settings(BaseSettings):
     assistant_memory_max_items: int = 20
     assistant_memory_max_tokens: int = 1200
     assistant_workspace_dir: str = "workspace"
-
-    # -- Synthesizer --------------------------------------------------------
-    synthesizer_max_papers: int = 40
 
     # -- LLM concurrency / rate-limit ----------------------------------------
     llm_max_concurrent: int = 4
