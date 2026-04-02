@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     # -- Synthesizer --------------------------------------------------------
     synthesizer_max_papers: int = 40
 
+    # -- LLM concurrency / rate-limit ----------------------------------------
+    llm_max_concurrent: int = 4
+    llm_max_retries: int = 5
+    llm_retry_min_wait: float = 2.0
+    llm_retry_max_wait: float = 60.0
+
     # -- Landscape memory / caching -----------------------------------------
     cache_dir: str = "../data/cache"
     s2_cache_enabled: bool = True

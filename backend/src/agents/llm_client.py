@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, TypeVar
@@ -20,6 +21,19 @@ from src.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+_semaphore: asyncio.Semaphore | None = None
+_semaphore_limit: int = 0
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """Lazily create a per-event-loop semaphore to cap concurrent LLM calls."""
+    global _semaphore, _semaphore_limit
+    cfg = get_settings()
+    if _semaphore is None or _semaphore_limit != cfg.llm_max_concurrent:
+        _semaphore_limit = cfg.llm_max_concurrent
+        _semaphore = asyncio.Semaphore(_semaphore_limit)
+    return _semaphore
 
 
 def _default_model() -> str:
@@ -140,55 +154,35 @@ def _parse_structured_message(message: Any, response_format: type[T]) -> T:
         raise ValueError("LLM returned non-JSON or schema-invalid content")
 
 
+# ---------------------------------------------------------------------------
+# Retry + concurrency-gated LLM call
+# ---------------------------------------------------------------------------
+
+
 @retry(
     retry=retry_if_exception_type(
         (litellm.Timeout, litellm.RateLimitError, litellm.APIConnectionError)
     ),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
-    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=60),
+    stop=stop_after_attempt(5),
     reraise=True,
 )
-async def call_llm(
+async def _call_llm_inner(
     messages: list[dict[str, str]],
     response_format: type[T],
     *,
     model: str | None = None,
     temperature: float = 0.3,
 ) -> T:
-    """Call an LLM via litellm and return a validated Pydantic object.
-
-    Parameters
-    ----------
-    messages : list of {"role": ..., "content": ...} dicts.
-    response_format : A ``BaseModel`` subclass. Sent as strict JSON schema
-        constraints, then validated back into the model.
-    model : Override the default model (env ``LLM_MODEL``).
-    temperature : Sampling temperature.
-
-    Returns
-    -------
-    An instance of *response_format* populated from the LLM response.
-
-    Raises
-    ------
-    ValueError
-        If the model refused to answer or returned schema-invalid content.
-    """
     cfg = get_settings()
     resolved_model = model or _default_model()
-
-    logger.debug(
-        "call_llm  model=%s  response_format=%s  messages=%d",
-        resolved_model,
-        response_format.__name__,
-        len(messages),
-    )
 
     kwargs: dict[str, Any] = {
         "model": resolved_model,
         "messages": messages,
         "response_format": _response_format_schema(response_format),
         "temperature": temperature,
+        "num_retries": 0,
     }
     if cfg.llm_api_key:
         kwargs["api_key"] = cfg.llm_api_key
@@ -202,3 +196,33 @@ async def call_llm(
 
     logger.debug("call_llm  tokens=%s", completion.usage)
     return _parse_structured_message(message, response_format)
+
+
+async def call_llm(
+    messages: list[dict[str, str]],
+    response_format: type[T],
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+) -> T:
+    """Call an LLM via litellm and return a validated Pydantic object.
+
+    Concurrency is gated by a global semaphore (``llm_max_concurrent``).
+    Retries are handled by tenacity only (OpenAI SDK retries disabled via
+    ``num_retries=0``).
+    """
+    sem = _get_semaphore()
+    logger.debug(
+        "call_llm  model=%s  response_format=%s  messages=%d  sem_waiting=%d",
+        model or _default_model(),
+        response_format.__name__,
+        len(messages),
+        sem._value if hasattr(sem, "_value") else -1,
+    )
+    async with sem:
+        return await _call_llm_inner(
+            messages,
+            response_format,
+            model=model,
+            temperature=temperature,
+        )
