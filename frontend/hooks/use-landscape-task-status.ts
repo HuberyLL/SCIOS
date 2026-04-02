@@ -6,13 +6,47 @@ import type {
   DynamicResearchLandscape,
   LandscapeSSEEvent,
   LandscapeTaskListItem,
+  PipelineStage,
+  StageId,
   TaskStatus,
 } from "@/types";
+
+// ---------------------------------------------------------------------------
+// Stage definitions (matches backend _STAGES)
+// ---------------------------------------------------------------------------
+
+const STAGE_DEFINITIONS: { id: StageId; label: string; index: number }[] = [
+  { id: "scope", label: "Scope Agent", index: 1 },
+  { id: "retrieval", label: "Retrieval Agent", index: 2 },
+  { id: "taxonomy", label: "Taxonomy Agent", index: 3 },
+  { id: "network", label: "Network Agent", index: 4 },
+  { id: "gaps", label: "Gap Agent", index: 4 },
+  { id: "critic", label: "Critic Agent", index: 5 },
+  { id: "assembler", label: "Assembler", index: 6 },
+];
+
+function createInitialStages(): PipelineStage[] {
+  return STAGE_DEFINITIONS.map((d) => ({
+    id: d.id,
+    label: d.label,
+    index: d.index,
+    status: "pending",
+    messages: [],
+    elapsed_s: 0,
+    detail: null,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Public interface
+// ---------------------------------------------------------------------------
 
 export interface UseLandscapeTaskStatusReturn {
   status: TaskStatus | null;
   landscape: DynamicResearchLandscape | null;
   messages: string[];
+  stages: PipelineStage[];
+  progressPct: number;
   error: string | null;
   loading: boolean;
 }
@@ -22,6 +56,8 @@ interface InternalState {
   status: TaskStatus | null;
   landscape: DynamicResearchLandscape | null;
   messages: string[];
+  stages: PipelineStage[];
+  progressPct: number;
   error: string | null;
   loading: boolean;
 }
@@ -30,19 +66,36 @@ const POLL_INTERVAL = 2_500;
 
 function initialStateFor(task: LandscapeTaskListItem | null): InternalState {
   if (!task) {
-    return { taskKey: null, status: null, landscape: null, messages: [], error: null, loading: false };
+    return {
+      taskKey: null, status: null, landscape: null, messages: [],
+      stages: createInitialStages(), progressPct: 0,
+      error: null, loading: false,
+    };
   }
   if (task.status === "completed") {
-    return { taskKey: task.task_id, status: "completed", landscape: null, messages: [], error: null, loading: true };
+    return {
+      taskKey: task.task_id, status: "completed", landscape: null, messages: [],
+      stages: createInitialStages(), progressPct: 100,
+      error: null, loading: true,
+    };
   }
   if (task.status === "failed") {
-    return { taskKey: task.task_id, status: "failed", landscape: null, messages: [], error: task.progress_message || "Task failed", loading: false };
+    return {
+      taskKey: task.task_id, status: "failed", landscape: null, messages: [],
+      stages: createInitialStages(), progressPct: 0,
+      error: task.progress_message || "Task failed", loading: false,
+    };
   }
-  return { taskKey: task.task_id, status: task.status, landscape: null, messages: [], error: null, loading: false };
+  return {
+    taskKey: task.task_id, status: task.status, landscape: null, messages: [],
+    stages: createInitialStages(), progressPct: 0,
+    error: null, loading: false,
+  };
 }
 
 /**
- * Subscribes to a selected landscape task's real-time status.
+ * Subscribes to a selected landscape task's real-time status with structured
+ * stage tracking for the Pipeline Stepper UI.
  */
 export function useLandscapeTaskStatus(
   task: LandscapeTaskListItem | null,
@@ -58,10 +111,12 @@ export function useLandscapeTaskStatus(
   const taskId = task?.task_id ?? null;
   const taskStatus = task?.status ?? null;
 
-  // Reset state during render when the selected task changes
-  if (state.taskKey !== taskId) {
-    setState(initialStateFor(task));
-  }
+  useEffect(() => {
+    setState((prev) => {
+      if (prev.taskKey === taskId) return prev;
+      return initialStateFor(task);
+    });
+  }, [taskId, task]);
 
   // Completed tasks: fetch result once
   useEffect(() => {
@@ -75,6 +130,7 @@ export function useLandscapeTaskStatus(
           ...prev,
           landscape: res.result,
           loading: false,
+          progressPct: 100,
         }));
       })
       .catch(() => {
@@ -105,12 +161,40 @@ export function useLandscapeTaskStatus(
         const data = JSON.parse(event.data) as LandscapeSSEEvent;
 
         switch (data.type) {
-          case "progress":
-            setState((prev) => ({
-              ...prev,
-              messages: [...prev.messages, data.message],
-            }));
+          case "progress": {
+            const stageId = data.stage_id;
+            const stageStatus = (data.status ?? "running") as PipelineStage["status"];
+            const pct = data.progress_pct ?? 0;
+
+            setState((prev) => {
+              const newMessages = [...prev.messages, data.message];
+
+              if (!stageId) {
+                return { ...prev, messages: newMessages };
+              }
+
+              const newStages = prev.stages.map((s) => {
+                if (s.id === stageId) {
+                  return {
+                    ...s,
+                    status: stageStatus,
+                    elapsed_s: data.elapsed_s ?? s.elapsed_s,
+                    detail: data.detail ?? s.detail,
+                    messages: [...s.messages, data.message],
+                  };
+                }
+                return s;
+              });
+
+              return {
+                ...prev,
+                messages: newMessages,
+                stages: newStages,
+                progressPct: Math.max(prev.progressPct, pct),
+              };
+            });
             break;
+          }
           case "status":
             setState((prev) => ({
               ...prev,
@@ -122,6 +206,7 @@ export function useLandscapeTaskStatus(
               ...prev,
               status: "completed",
               landscape: data.result ?? null,
+              progressPct: 100,
             }));
             es.close();
             onStatusChangeRef.current?.();
@@ -146,7 +231,7 @@ export function useLandscapeTaskStatus(
             break;
         }
       } catch {
-        // malformed JSON
+        // malformed JSON — skip
       }
     };
 
@@ -172,6 +257,7 @@ export function useLandscapeTaskStatus(
             ...prev,
             status: "completed",
             landscape: res.result,
+            progressPct: 100,
           }));
           es.close();
           onStatusChangeRef.current?.();
@@ -206,6 +292,8 @@ export function useLandscapeTaskStatus(
     status: state.status,
     landscape: state.landscape,
     messages: state.messages,
+    stages: state.stages,
+    progressPct: state.progressPct,
     error: state.error,
     loading: state.loading,
   };

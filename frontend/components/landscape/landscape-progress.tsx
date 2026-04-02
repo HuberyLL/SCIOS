@@ -1,125 +1,232 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Loader2, AlertCircle } from "lucide-react";
+import {
+  Loader2,
+  AlertCircle,
+  Check,
+  Circle,
+  SkipForward,
+  ChevronDown,
+} from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { TaskStatus } from "@/types";
+import type { PipelineStage, TaskStatus } from "@/types";
 
 interface LandscapeProgressProps {
   messages: string[];
+  stages: PipelineStage[];
+  progressPct: number;
   status: TaskStatus | null;
   error: string | null;
 }
 
-const STAGE_WEIGHTS: Record<string, number> = {
-  plan: 15,
-  retriev: 40,
-  enrich: 50,
-  build: 65,
-  graph: 65,
-  analyz: 70,
-  assembl: 85,
-  complet: 100,
-};
+// ---------------------------------------------------------------------------
+// Stage status icon
+// ---------------------------------------------------------------------------
 
-function estimateProgress(messages: string[]): number {
-  if (messages.length === 0) return 5;
-  const last = messages[messages.length - 1].toLowerCase();
-  for (const [keyword, pct] of Object.entries(STAGE_WEIGHTS)) {
-    if (last.includes(keyword)) return pct;
+function StageIcon({ status }: { status: PipelineStage["status"] }) {
+  switch (status) {
+    case "running":
+      return <Loader2 className="h-4 w-4 animate-spin text-primary" />;
+    case "completed":
+      return <Check className="h-4 w-4 text-emerald-500" />;
+    case "failed":
+      return <AlertCircle className="h-4 w-4 text-destructive" />;
+    case "skipped":
+      return <SkipForward className="h-4 w-4 text-muted-foreground/50" />;
+    default:
+      return <Circle className="h-3.5 w-3.5 text-muted-foreground/30" />;
   }
-  return Math.min(10 + messages.length * 10, 95);
 }
 
-export function LandscapeProgress({ messages, status, error }: LandscapeProgressProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+// ---------------------------------------------------------------------------
+// Single stage row
+// ---------------------------------------------------------------------------
+
+function StageRow({ stage }: { stage: PipelineStage }) {
+  const isActive = stage.status === "running";
+  const isDone = stage.status === "completed" || stage.status === "failed";
+  const hasMessages = stage.messages.length > 0;
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [messages]);
+    if (isActive) setExpanded(true);
+    if (isDone) {
+      const t = setTimeout(() => setExpanded(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [isActive, isDone]);
 
-  const progress =
-    status === "completed"
-      ? 100
-      : status === "running" && messages.length === 0
-        ? 8
-        : estimateProgress(messages);
-  const failed = status === "failed";
+  const detailSummary = stage.detail
+    ? Object.entries(stage.detail)
+        .filter(([, v]) => typeof v === "number" || typeof v === "string")
+        .map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`)
+        .join("  ·  ")
+    : null;
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 p-8">
-      <div className="w-full max-w-2xl text-center">
-        <h2 className="mb-2 text-lg font-semibold text-foreground">
-          {failed ? "Analysis Failed" : "Building Research Landscape..."}
+    <div className="relative pl-7">
+      {/* Timeline connector line */}
+      <div className="absolute left-[7px] top-0 bottom-0 w-px bg-border" />
+
+      {/* Status icon (overlays the line) */}
+      <div className="absolute left-0 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-background">
+        <StageIcon status={stage.status} />
+      </div>
+
+      <div className="pb-4">
+        {/* Header row: clickable to toggle */}
+        <button
+          type="button"
+          onClick={() => hasMessages && setExpanded((e) => !e)}
+          className="flex w-full items-center gap-2 text-left"
+        >
+          <span
+            className={`text-sm font-medium ${
+              isActive
+                ? "text-foreground"
+                : isDone
+                  ? "text-foreground/80"
+                  : "text-muted-foreground/50"
+            }`}
+          >
+            {stage.label}
+          </span>
+
+          {stage.elapsed_s > 0 && (
+            <span className="font-mono text-[11px] text-muted-foreground/60">
+              {stage.elapsed_s.toFixed(1)}s
+            </span>
+          )}
+
+          {hasMessages && (
+            <ChevronDown
+              className={`ml-auto h-3.5 w-3.5 text-muted-foreground/40 transition-transform ${
+                expanded ? "rotate-180" : ""
+              }`}
+            />
+          )}
+        </button>
+
+        {/* Detail summary chips */}
+        {detailSummary && isDone && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground/60">
+            {detailSummary}
+          </p>
+        )}
+
+        {/* Expandable sub-messages */}
+        <AnimatePresence initial={false}>
+          {expanded && hasMessages && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-1.5 space-y-0.5 rounded-md border border-border/40 bg-muted/20 p-2">
+                {stage.messages.map((msg, i) => (
+                  <div
+                    key={i}
+                    className="flex items-start gap-1.5"
+                  >
+                    <span className="mt-0.5 select-none font-mono text-[10px] text-muted-foreground/40">
+                      &gt;
+                    </span>
+                    <span className="font-mono text-[11px] leading-relaxed text-foreground/70">
+                      {msg}
+                    </span>
+                  </div>
+                ))}
+                {isActive && (
+                  <span className="ml-3 inline-block h-3 w-1 animate-pulse bg-foreground/30" />
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main progress component
+// ---------------------------------------------------------------------------
+
+export function LandscapeProgress({
+  stages,
+  progressPct,
+  status,
+  error,
+}: LandscapeProgressProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const failed = status === "failed";
+
+  // Auto-scroll when active stage changes
+  useEffect(() => {
+    const activeIdx = stages.findIndex((s) => s.status === "running");
+    if (activeIdx >= 0 && scrollRef.current) {
+      const items = scrollRef.current.querySelectorAll("[data-stage]");
+      items[activeIdx]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [stages]);
+
+  const displayPct = status === "completed" ? 100 : progressPct;
+
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-5 p-8">
+      {/* Title */}
+      <div className="w-full max-w-lg text-center">
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
+          {failed ? "Analysis Failed" : "Building Research Landscape"}
         </h2>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {failed
             ? error ?? "Something went wrong."
-            : "Retrieving papers, building tech tree, mapping collaborations, and analyzing gaps."}
+            : "Multi-agent pipeline is analysing papers, scholars, and research gaps."}
         </p>
       </div>
 
+      {/* Overall progress bar */}
       {!failed && (
-        <div className="w-full max-w-2xl space-y-1">
-          <Progress value={progress} className="h-1.5" />
+        <div className="w-full max-w-lg space-y-1">
+          <Progress value={displayPct} className="h-1.5" />
           <p className="text-right font-mono text-[11px] text-muted-foreground/60">
-            {progress}%
+            {displayPct}%
           </p>
         </div>
       )}
 
+      {/* Pipeline Stepper */}
       <div
         ref={scrollRef}
-        className="w-full max-w-2xl max-h-64 overflow-y-auto rounded-lg border border-border/50 bg-muted/30 p-4"
+        className="w-full max-w-lg max-h-[420px] overflow-y-auto rounded-lg border border-border/50 bg-muted/10 p-4"
       >
-        <AnimatePresence initial={false}>
-          {messages.map((msg, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2 }}
-              className="flex items-start gap-2 py-0.5"
-            >
-              <span className="mt-0.5 select-none font-mono text-xs text-muted-foreground/50">
-                &gt;
-              </span>
-              <span className="font-mono text-xs leading-relaxed text-foreground/80">
-                {msg}
-              </span>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {!failed && messages.length > 0 && (
-          <span className="ml-4 inline-block h-3.5 w-1.5 animate-pulse bg-foreground/40" />
-        )}
+        {stages.map((stage) => (
+          <div key={stage.id} data-stage={stage.id}>
+            <StageRow stage={stage} />
+          </div>
+        ))}
       </div>
 
-      {!failed && (
-        <div className="w-full max-w-2xl space-y-3">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
-          <Skeleton className="h-4 w-5/6" />
+      {/* Loading skeleton */}
+      {!failed && status === "running" && (
+        <div className="w-full max-w-lg space-y-2.5">
+          <Skeleton className="h-3.5 w-3/4" />
+          <Skeleton className="h-3.5 w-1/2" />
+          <Skeleton className="h-3.5 w-5/6" />
         </div>
       )}
 
+      {/* Error display */}
       {failed && error && (
         <div className="flex items-center gap-2 text-xs text-destructive">
           <AlertCircle className="h-3.5 w-3.5" />
           {error}
-        </div>
-      )}
-
-      {!failed && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground/50">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          This may take 60–120 seconds
         </div>
       )}
     </div>

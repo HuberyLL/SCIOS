@@ -286,18 +286,19 @@ class TestBaseAgent:
     async def test_run_reports_progress(self):
         from src.agents.landscape.agents.base import BaseAgent
 
-        messages: list[str] = []
+        events: list[dict] = []
 
         class DummyAgent(BaseAgent[str, PaperCorpus]):
             async def _execute(self, input_data, *, on_progress=None):
                 await self._notify(on_progress, "working …")
                 return _corpus()
 
-        async def track(msg: str) -> None:
-            messages.append(msg)
+        async def track(event: dict) -> None:
+            events.append(event)
 
         agent = DummyAgent(name="TestAgent")
         await agent.run("test", on_progress=track)
+        messages = [e.get("message", "") for e in events]
         assert any("starting" in m for m in messages)
         assert any("working" in m for m in messages)
 

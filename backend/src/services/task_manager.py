@@ -104,10 +104,35 @@ def _update_fields(task_id: str, **kwargs: Any) -> None:
         session.commit()
 
 
-def update_task_progress(task_id: str, message: str) -> None:
-    """Update the progress_message column and notify SSE subscribers."""
-    _update_fields(task_id, progress_message=message)
-    _publish(task_id, {"type": "progress", "message": message})
+def update_task_progress(task_id: str, event: dict[str, Any]) -> None:
+    """Persist both the human-readable message and the accumulated stage snapshot,
+    then push the complete event to SSE subscribers.
+
+    ``progress_snapshot`` is a dict mapping ``stage_id`` to the latest event for
+    that stage.  On SSE reconnect the endpoint replays these events so the
+    frontend can fully reconstruct the pipeline stepper state.
+    """
+    message = event.get("message", "")
+    event.setdefault("type", "progress")
+
+    stage_id = event.get("stage_id")
+    snapshot_update: dict[str, Any] | None = None
+    if stage_id:
+        with Session(get_engine()) as session:
+            record = session.get(TaskRecord, task_id)
+            if record is not None:
+                snapshot: dict[str, Any] = record.progress_snapshot or {}
+                snapshot[stage_id] = event
+                record.progress_message = message
+                record.progress_snapshot = snapshot
+                record.updated_at = _now()
+                session.add(record)
+                session.commit()
+                snapshot_update = snapshot  # noqa: F841 – kept for clarity
+    else:
+        _update_fields(task_id, progress_message=message)
+
+    _publish(task_id, event)
 
 
 # ---- Background runner ----
@@ -120,8 +145,8 @@ async def run_landscape_task(task_id: str, topic: str) -> None:
     _update_fields(task_id, status=TaskStatus.running)
     _publish(task_id, {"type": "status", "status": "running"})
 
-    async def _on_progress(msg: str) -> None:
-        update_task_progress(task_id, msg)
+    async def _on_progress(event: dict[str, Any]) -> None:
+        update_task_progress(task_id, event)
 
     try:
         landscape: DynamicResearchLandscape = await run_landscape_pipeline(

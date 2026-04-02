@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
-ProgressCallback = Callable[[str], Awaitable[None]] | None
+ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 
 class BaseAgent(ABC, Generic[InputT, OutputT]):
@@ -50,8 +50,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         self._logger.info("%s starting", self.name)
         t0 = time.perf_counter()
 
-        if on_progress is not None:
-            await on_progress(f"{self.name}: starting …")
+        await self._notify(on_progress, "starting …")
 
         try:
             result = await self._execute(input_data, on_progress=on_progress)
@@ -77,6 +76,10 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         ...
 
     async def _notify(self, on_progress: ProgressCallback, message: str) -> None:
-        """Convenience helper to send a progress update if callback is set."""
+        """Send a structured progress event with agent context."""
         if on_progress is not None:
-            await on_progress(f"{self.name}: {message}")
+            await on_progress({
+                "type": "progress",
+                "agent": self.name,
+                "message": f"{self.name}: {message}",
+            })

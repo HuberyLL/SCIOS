@@ -30,7 +30,7 @@ export function LandscapeWorkspace() {
     refresh();
   }, [refresh]);
 
-  const { status, landscape, messages, error, loading: resultLoading } =
+  const { status, landscape, messages, stages, progressPct, error, loading: resultLoading } =
     useLandscapeTaskStatus(selectedTask, onStatusChange);
 
   const handleRetry = useCallback(() => {
@@ -58,6 +58,8 @@ export function LandscapeWorkspace() {
         ) : status === "pending" || status === "running" ? (
           <LandscapeProgress
             messages={messages}
+            stages={stages}
+            progressPct={progressPct}
             status={status}
             error={error}
           />

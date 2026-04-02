@@ -210,6 +210,30 @@ class QualityReport(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Pipeline progress events (used by orchestrator -> SSE -> frontend)
+# ---------------------------------------------------------------------------
+
+class ProgressEvent(BaseModel):
+    """Structured progress event emitted by the pipeline orchestrator."""
+
+    stage_id: str = Field(
+        ...,
+        description="Stage identifier: scope | retrieval | taxonomy | network | gaps | critic | assembler",
+    )
+    stage_index: int = Field(..., description="1-based stage index (4 for both network and gaps).")
+    stage_total: int = Field(default=6, description="Total number of stages.")
+    status: str = Field(
+        default="running",
+        description="Stage status: running | completed | failed | skipped",
+    )
+    message: str = Field(..., description="Human-readable progress description.")
+    progress_pct: int = Field(default=0, description="Overall pipeline progress 0-100.")
+    elapsed_s: float = Field(default=0.0, description="Seconds elapsed in this stage.")
+    detail: dict | None = Field(default=None, description="Optional stats, e.g. paper_count.")
+    agent: str | None = Field(default=None, description="Agent name for sub-messages.")
+
+
+# ---------------------------------------------------------------------------
 # S2 Author profile (used by Network Agent)
 # ---------------------------------------------------------------------------
 

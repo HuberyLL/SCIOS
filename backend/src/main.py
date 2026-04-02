@@ -16,7 +16,7 @@ from sqlmodel import SQLModel
 
 from src.api.v1.assistant import router as assistant_router
 from src.api.v1.landscape import router as landscape_router
-from src.models.db import get_engine
+from src.models.db import apply_lightweight_migrations, get_engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +28,7 @@ logging.basicConfig(
 async def lifespan(app: FastAPI):
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
+    apply_lightweight_migrations(engine)
     import src.agents.assistant.tools  # noqa: F401 — trigger tool registration
     yield
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from src.core.config import get_settings
 from src.models.assistant import AssistantMessage, AssistantSession  # noqa: F401
 
 _engine = None
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, enum.Enum):
@@ -34,6 +36,10 @@ class TaskRecord(SQLModel, table=True):
         sa_column=Column(SAEnum(TaskStatus), nullable=False, default=TaskStatus.pending)
     )
     progress_message: str = ""
+    progress_snapshot: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON),
+        description="Latest structured progress event for SSE catch-up on reconnect.",
+    )
     result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -83,6 +89,35 @@ def get_engine():
             connect_args={"check_same_thread": False},
         )
     return _engine
+
+
+def apply_lightweight_migrations(engine) -> None:
+    """Apply idempotent runtime DB migrations for backward compatibility.
+
+    This project currently uses ``SQLModel.metadata.create_all()`` without a
+    full migration framework. For existing SQLite files, ``create_all`` does
+    not add newly introduced columns to existing tables. This helper patches
+    those schema gaps safely at startup.
+    """
+    with engine.begin() as conn:
+        table_row = conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='task_records'",
+        ).fetchone()
+        if table_row is None:
+            return
+
+        columns = {
+            row[1]
+            for row in conn.exec_driver_sql("PRAGMA table_info(task_records)").fetchall()
+        }
+
+        if "progress_snapshot" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE task_records ADD COLUMN progress_snapshot JSON",
+            )
+            logger.info(
+                "Applied lightweight DB migration: added task_records.progress_snapshot",
+            )
 
 
 def get_session():

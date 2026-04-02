@@ -151,11 +151,47 @@ export interface LandscapeTaskStatus {
 }
 
 // ---------------------------------------------------------------------------
+// Pipeline stage tracking (for structured progress UI)
+// ---------------------------------------------------------------------------
+
+export type StageId =
+  | "scope"
+  | "retrieval"
+  | "taxonomy"
+  | "network"
+  | "gaps"
+  | "critic"
+  | "assembler";
+
+export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface PipelineStage {
+  id: StageId;
+  label: string;
+  index: number;
+  status: StageStatus;
+  messages: string[];
+  elapsed_s: number;
+  detail: Record<string, unknown> | null;
+}
+
+// ---------------------------------------------------------------------------
 // SSE event discriminated union — mirrors backend SSE `data:` payloads
 // ---------------------------------------------------------------------------
 
 export type LandscapeSSEEvent =
-  | { type: "progress"; message: string }
+  | {
+      type: "progress";
+      message: string;
+      stage_id?: StageId;
+      stage_index?: number;
+      stage_total?: number;
+      status?: string;
+      progress_pct?: number;
+      elapsed_s?: number;
+      detail?: Record<string, unknown>;
+      agent?: string;
+    }
   | { type: "status"; status: string }
   | { type: "complete"; status: "completed"; result?: DynamicResearchLandscape }
   | { type: "error"; status: "failed"; message?: string }

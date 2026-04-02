@@ -161,58 +161,74 @@ async def stream_status(task_id: str) -> StreamingResponse:
 
     async def _event_generator():
         queue = task_manager.subscribe(task_id)
-        last_status: str | None = None
-        last_progress: str | None = None
 
         try:
+            # --- Initial catch-up from DB (sent exactly once) ---
+            record = task_manager.get_task(task_id)
+            if record is None:
+                yield _sse_line({
+                    "type": "error", "status": "failed",
+                    "message": "Task not found",
+                })
+                return
+
+            yield _sse_line({"type": "status", "status": record.status.value})
+
+            # Replay accumulated stage events so the stepper can reconstruct
+            snapshot: dict[str, Any] = record.progress_snapshot or {}
+            if snapshot:
+                for _stage_id, stage_event in snapshot.items():
+                    yield _sse_line(stage_event)
+            elif record.progress_message:
+                yield _sse_line({
+                    "type": "progress",
+                    "message": record.progress_message,
+                })
+
+            if record.status == TaskStatus.completed:
+                yield _sse_line({
+                    "type": "complete", "status": "completed",
+                    "result": record.result,
+                })
+                return
+
+            if record.status == TaskStatus.failed:
+                yield _sse_line({
+                    "type": "error", "status": "failed",
+                    "message": record.progress_message or "Task failed",
+                })
+                return
+
+            # --- Live stream: only forward queue events ---
             while True:
-                record = task_manager.get_task(task_id)
-                if record is None:
-                    yield _sse_line({
-                        "type": "error",
-                        "status": "failed",
-                        "message": "Task not found",
-                    })
-                    break
-
-                status_value = record.status.value
-                if status_value != last_status:
-                    yield _sse_line({"type": "status", "status": status_value})
-                    last_status = status_value
-
-                progress_message = record.progress_message or ""
-                if progress_message and progress_message != last_progress:
-                    yield _sse_line({"type": "progress", "message": progress_message})
-                    last_progress = progress_message
-
-                if record.status == TaskStatus.completed:
-                    yield _sse_line({
-                        "type": "complete",
-                        "status": "completed",
-                        "result": record.result,
-                    })
-                    break
-
-                if record.status == TaskStatus.failed:
-                    yield _sse_line({
-                        "type": "error",
-                        "status": "failed",
-                        "message": progress_message or "Task failed",
-                    })
-                    break
-
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=8)
                 except asyncio.TimeoutError:
+                    # Heartbeat: check if task finished while we waited
+                    record = task_manager.get_task(task_id)
+                    if record is None:
+                        yield _sse_line({
+                            "type": "error", "status": "failed",
+                            "message": "Task not found",
+                        })
+                        break
+                    if record.status == TaskStatus.completed:
+                        yield _sse_line({
+                            "type": "complete", "status": "completed",
+                            "result": record.result,
+                        })
+                        break
+                    if record.status == TaskStatus.failed:
+                        yield _sse_line({
+                            "type": "error", "status": "failed",
+                            "message": record.progress_message or "Task failed",
+                        })
+                        break
                     continue
 
                 yield _sse_line(event)
                 if event.get("type") in ("complete", "error"):
                     break
-                if event.get("type") == "status":
-                    last_status = str(event.get("status"))
-                if event.get("type") == "progress":
-                    last_progress = str(event.get("message") or "")
         finally:
             task_manager.unsubscribe(task_id, queue)
 
