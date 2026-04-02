@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 from src.models.landscape import ResearchGap, ResearchGaps, TechTree, TechTreeNode
 from src.models.paper import PaperResult
 
+from src.core.config import get_settings
+
 from ...llm_client import call_llm
 from ..prompts.gap_prompts import (
     GAP_ANALYSIS_SYSTEM,
@@ -92,23 +94,23 @@ class GapAgent(BaseAgent[GapInput, ResearchGaps]):
         stale_map = {s.split(" (")[0]: s for s in stale_branches}
         no_alt_map = {n.split(" (")[0]: n for n in no_alt_branches}
 
-        # Map phase: analyse each branch in parallel
+        # Map phase: analyse branches with bounded concurrency
         await self._notify(on_progress, "analysing gaps per branch …")
-        branch_tasks = []
-        for node in tech_tree.nodes:
-            branch_papers = self._papers_for_branch(node, corpus, lookup)
-            branch_frontier = self._frontier_for_branch(node, frontier, corpus)
-            stale_text = stale_map.get(node.node_id, "none")
-            no_alt_text = no_alt_map.get(node.node_id, "none")
+        cfg = get_settings()
+        sem = asyncio.Semaphore(cfg.landscape_gap_branch_concurrency)
 
-            branch_tasks.append(
-                self._analyze_branch(
-                    scope, node, branch_papers, branch_frontier,
-                    stale_text, no_alt_text,
-                )
-            )
+        async def _guarded_branch(node_: TechTreeNode) -> _BranchGapResult:
+            async with sem:
+                bp = self._papers_for_branch(node_, corpus, lookup)
+                bf = self._frontier_for_branch(node_, frontier, corpus)
+                st = stale_map.get(node_.node_id, "none")
+                na = no_alt_map.get(node_.node_id, "none")
+                return await self._analyze_branch(scope, node_, bp, bf, st, na)
 
-        branch_results = await asyncio.gather(*branch_tasks, return_exceptions=True)
+        branch_results = await asyncio.gather(
+            *[_guarded_branch(n) for n in tech_tree.nodes],
+            return_exceptions=True,
+        )
 
         all_branch_gaps: list[tuple[str, _BranchGapResult]] = []
         succeeded = 0

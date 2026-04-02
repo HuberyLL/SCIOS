@@ -10,7 +10,8 @@ from typing import Any, TypeVar
 import litellm
 from pydantic import BaseModel
 from tenacity import (
-    retry,
+    AsyncRetrying,
+    RetryError,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -22,8 +23,29 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
+class LLMFatalError(Exception):
+    """Raised for LLM errors that must never be retried (quota, billing, auth)."""
+
+
+_FATAL_KEYWORDS = frozenset({
+    "insufficient_quota",
+    "exceeded your current quota",
+    "billing_not_active",
+    "billing hard limit",
+    "account_deactivated",
+    "invalid_api_key",
+    "organization has been disabled",
+    "project has been deactivated",
+})
+
 _semaphore: asyncio.Semaphore | None = None
 _semaphore_limit: int = 0
+
+
+def _is_fatal(exc: BaseException) -> bool:
+    """Return True for errors that should never be retried."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in _FATAL_KEYWORDS)
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -159,21 +181,14 @@ def _parse_structured_message(message: Any, response_format: type[T]) -> T:
 # ---------------------------------------------------------------------------
 
 
-@retry(
-    retry=retry_if_exception_type(
-        (litellm.Timeout, litellm.RateLimitError, litellm.APIConnectionError)
-    ),
-    wait=wait_exponential(multiplier=2, min=2, max=60),
-    stop=stop_after_attempt(5),
-    reraise=True,
-)
-async def _call_llm_inner(
+async def _call_llm_once(
     messages: list[dict[str, str]],
     response_format: type[T],
     *,
     model: str | None = None,
     temperature: float = 0.3,
 ) -> T:
+    """Single LLM round-trip (no retry, no semaphore)."""
     cfg = get_settings()
     resolved_model = model or _default_model()
 
@@ -207,22 +222,37 @@ async def call_llm(
 ) -> T:
     """Call an LLM via litellm and return a validated Pydantic object.
 
-    Concurrency is gated by a global semaphore (``llm_max_concurrent``).
-    Retries are handled by tenacity only (OpenAI SDK retries disabled via
-    ``num_retries=0``).
+    * Concurrency gated by a global semaphore (``llm_max_concurrent``).
+    * Retries handled by tenacity with **config-driven** parameters.
+    * ``insufficient_quota`` / billing errors fail immediately (no retry).
+    * OpenAI SDK built-in retries disabled (``num_retries=0``).
     """
+    cfg = get_settings()
     sem = _get_semaphore()
-    logger.debug(
-        "call_llm  model=%s  response_format=%s  messages=%d  sem_waiting=%d",
-        model or _default_model(),
-        response_format.__name__,
-        len(messages),
-        sem._value if hasattr(sem, "_value") else -1,
-    )
+
     async with sem:
-        return await _call_llm_inner(
-            messages,
-            response_format,
-            model=model,
-            temperature=temperature,
-        )
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type(
+                (litellm.Timeout, litellm.RateLimitError,
+                 litellm.APIConnectionError),
+            ),
+            wait=wait_exponential(
+                multiplier=2,
+                min=cfg.llm_retry_min_wait,
+                max=cfg.llm_retry_max_wait,
+            ),
+            stop=stop_after_attempt(cfg.llm_max_retries),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await _call_llm_once(
+                        messages, response_format,
+                        model=model, temperature=temperature,
+                    )
+                except (litellm.RateLimitError,
+                        litellm.AuthenticationError) as exc:
+                    if _is_fatal(exc):
+                        raise LLMFatalError(str(exc)) from exc
+                    raise
+    raise RuntimeError("unreachable")

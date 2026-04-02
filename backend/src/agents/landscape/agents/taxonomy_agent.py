@@ -21,6 +21,8 @@ from pydantic import BaseModel, Field
 from src.models.landscape import TechTree, TechTreeEdge, TechTreeNode
 from src.models.paper import PaperResult
 
+from src.core.config import get_settings
+
 from ...llm_client import call_llm
 from ..prompts.taxonomy_prompts import (
     CLUSTER_LABEL_SYSTEM,
@@ -40,10 +42,10 @@ from .base import BaseAgent, ProgressCallback
 logger = logging.getLogger(__name__)
 
 # Per-unit batch sizes for LLM calls (how many items per single LLM call)
-BATCH_SIZE = 30             # papers per LLM call (map phase)
-MAX_ABSTRACT_CHARS = 500    # abstract truncation per paper
+BATCH_SIZE = 50             # papers per LLM call (map phase)
+MAX_ABSTRACT_CHARS = 400    # abstract truncation per paper (lower to fit bigger batches)
 EDGE_BATCH_SIZE = 40        # edge pairs per LLM call
-LARGE_CLUSTER_THRESHOLD = 80
+LARGE_CLUSTER_THRESHOLD = 120
 
 
 # ---------------------------------------------------------------------------
@@ -369,35 +371,37 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         papers: list[PaperResult],
         corpus: PaperCorpus,
     ) -> TechTreeNode | None:
-        """Map-Reduce: summarize batches in parallel, then synthesize."""
+        """Map-Reduce: summarize batches with bounded concurrency, then synthesize."""
         batches = [
             papers[i : i + BATCH_SIZE]
             for i in range(0, len(papers), BATCH_SIZE)
         ]
         total_batches = len(batches)
+        cfg = get_settings()
+        sem = asyncio.Semaphore(cfg.landscape_map_concurrency)
 
-        # Map phase: summarize each batch in parallel
         async def _summarize(batch_idx: int, batch: list[PaperResult]):
-            papers_text = "\n".join(_format_paper(p) for p in batch)
-            try:
-                return await call_llm(
-                    [
-                        {"role": "system", "content": CLUSTER_SUMMARIZE_SYSTEM},
-                        {"role": "user", "content": CLUSTER_SUMMARIZE_USER.format(
-                            cluster_hint=cluster_name,
-                            batch_idx=batch_idx + 1,
-                            batch_total=total_batches,
-                            papers_text=papers_text,
-                        )},
-                    ],
-                    response_format=_BatchSummary,
-                )
-            except Exception:
-                self._logger.warning(
-                    "Batch %d/%d summarization failed for '%s'",
-                    batch_idx + 1, total_batches, cluster_name,
-                )
-                return None
+            async with sem:
+                papers_text = "\n".join(_format_paper(p) for p in batch)
+                try:
+                    return await call_llm(
+                        [
+                            {"role": "system", "content": CLUSTER_SUMMARIZE_SYSTEM},
+                            {"role": "user", "content": CLUSTER_SUMMARIZE_USER.format(
+                                cluster_hint=cluster_name,
+                                batch_idx=batch_idx + 1,
+                                batch_total=total_batches,
+                                papers_text=papers_text,
+                            )},
+                        ],
+                        response_format=_BatchSummary,
+                    )
+                except Exception:
+                    self._logger.warning(
+                        "Batch %d/%d summarization failed for '%s'",
+                        batch_idx + 1, total_batches, cluster_name,
+                    )
+                    return None
 
         summaries = await asyncio.gather(
             *[_summarize(i, b) for i, b in enumerate(batches)],

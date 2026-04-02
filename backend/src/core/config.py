@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     llm_retry_min_wait: float = 2.0
     llm_retry_max_wait: float = 60.0
 
+    # -- Landscape agent concurrency ----------------------------------------
+    landscape_gap_branch_concurrency: int = 3
+    landscape_map_concurrency: int = 3
+
     # -- Landscape memory / caching -----------------------------------------
     cache_dir: str = "../data/cache"
     s2_cache_enabled: bool = True
