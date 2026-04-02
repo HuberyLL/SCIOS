@@ -1,6 +1,6 @@
 """Centralised application settings powered by pydantic-settings.
 
-All API keys, database paths, scheduler parameters and other tunables
+All API keys, database paths and other tunables
 are read from environment variables (or a ``.env`` file) and exposed as
 typed attributes on a single ``Settings`` instance.
 
@@ -40,24 +40,11 @@ class Settings(BaseSettings):
     # -- Database -----------------------------------------------------------
     db_path: str = "../data/scios.db"
 
-    # -- Monitoring scheduler -----------------------------------------------
-    monitoring_cron_hour: int = 8
-    monitoring_cron_minute: int = 0
-    monitoring_interval_minutes: int | None = None
-
     # -- Multi-source paper search ------------------------------------------
     core_api_key: str = ""
-    unpaywall_email: str = ""
     doaj_api_key: str = ""
     crossref_mailto: str = ""
     openalex_mailto: str = ""
-
-    # -- Source routing (Planner-hints-first) --------------------------------
-    source_routing_enabled: bool = True
-    source_routing_confidence_threshold: float = 0.6
-    source_routing_max_sources: int = 3
-    source_routing_stage_b_enabled: bool = True
-    source_routing_min_papers_stage_b: int = 5
 
     # -- Assistant mode ------------------------------------------------------
     assistant_model: str = ""
@@ -68,15 +55,49 @@ class Settings(BaseSettings):
     assistant_memory_max_tokens: int = 1200
     assistant_workspace_dir: str = "workspace"
 
-    # -- Synthesizer --------------------------------------------------------
-    synthesizer_max_papers: int = 40
+    # -- LLM concurrency / rate-limit ----------------------------------------
+    llm_max_concurrent: int = 4
+    llm_max_retries: int = 5
+    llm_retry_min_wait: float = 2.0
+    llm_retry_max_wait: float = 60.0
 
-    # -- Email notification (SMTP) ------------------------------------------
-    smtp_server: str = ""
-    smtp_port: int = 465
-    smtp_username: str = ""
-    smtp_password: str = ""
-    notification_email: str = ""
+    # -- Landscape agent concurrency ----------------------------------------
+    landscape_gap_branch_concurrency: int = 3
+    landscape_map_concurrency: int = 3
+
+    # -- Landscape evaluation / filtering ------------------------------------
+    # Paper scoring weights (must sum to 1.0)
+    eval_weight_citation: float = 0.35
+    eval_weight_influential: float = 0.15
+    eval_weight_venue: float = 0.20
+    eval_weight_recency: float = 0.10
+    eval_weight_structural: float = 0.20
+
+    eval_tier1_pct: float = 0.15
+    eval_tier2_pct: float = 0.50
+
+    eval_budget_narrow: int = 150
+    eval_budget_medium: int = 300
+    eval_budget_broad: int = 500
+
+    # Scholar filtering thresholds
+    scholar_min_h_index: int = 5
+    scholar_min_corpus_papers: int = 2
+    scholar_top_k: int = 50
+
+    # Scholar scoring weights (must sum to 1.0)
+    scholar_weight_h_index: float = 0.30
+    scholar_weight_relevance: float = 0.30
+    scholar_weight_citation: float = 0.25
+    scholar_weight_activity: float = 0.15
+
+    # -- Landscape memory / caching -----------------------------------------
+    cache_dir: str = "../data/cache"
+    s2_cache_enabled: bool = True
+    s2_cache_max_mb: int = 500
+    topic_cache_max_age_days: int = 7
+    topic_warm_start_max_age_days: int = 30
+
 
 
 @lru_cache(maxsize=1)

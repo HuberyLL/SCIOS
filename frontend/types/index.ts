@@ -1,64 +1,140 @@
 // ---------------------------------------------------------------------------
-// Exploration domain — mirrors backend/src/agents/exploration/schemas.py
+// Dynamic Research Landscape — mirrors backend/src/models/landscape.py
 // ---------------------------------------------------------------------------
 
-export interface CoreConcept {
-  term: string;
-  explanation: string;
+// -- TechTree ---------------------------------------------------------------
+
+export type TechTreeNodeType =
+  | "foundation"
+  | "breakthrough"
+  | "incremental"
+  | "application"
+  | "survey"
+  | "unverified";
+
+export type TechTreeRelation =
+  | "evolves_from"
+  | "extends"
+  | "alternative_to"
+  | "inspires";
+
+export interface TechTreeNode {
+  node_id: string;
+  label: string;
+  node_type: TechTreeNodeType;
+  year: number | null;
+  description: string;
+  importance: number;
+  depth: number;
+  representative_paper_ids: string[];
+  is_new: boolean;
 }
 
-export interface ScholarProfile {
+export interface TechTreeEdge {
+  source: string;
+  target: string;
+  relation: TechTreeRelation;
+  label: string;
+}
+
+export interface TechTree {
+  nodes: TechTreeNode[];
+  edges: TechTreeEdge[];
+}
+
+// -- CollaborationNetwork ---------------------------------------------------
+
+export interface ScholarNode {
+  scholar_id: string;
   name: string;
-  affiliation: string;
-  representative_works: string[];
-  contribution_summary: string;
+  affiliations: string[];
+  paper_count: number;
+  citation_count: number;
+  h_index: number;
+  top_paper_ids: string[];
+  is_new: boolean;
 }
 
-export interface RecommendedPaper {
+export interface CollaborationEdge {
+  source: string;
+  target: string;
+  weight: number;
+  shared_paper_ids: string[];
+}
+
+export interface CollaborationNetwork {
+  nodes: ScholarNode[];
+  edges: CollaborationEdge[];
+}
+
+// -- ResearchGaps -----------------------------------------------------------
+
+export type GapImpact = "high" | "medium" | "low";
+
+export interface ResearchGap {
+  gap_id: string;
   title: string;
-  authors: string[];
-  year: number;
-  venue: string;
-  citation_count: number;
+  description: string;
+  evidence_paper_ids: string[];
+  potential_approaches: string[];
+  impact: GapImpact;
+}
+
+export interface ResearchGaps {
+  gaps: ResearchGap[];
   summary: string;
-  url: string;
 }
 
-export interface TrendsAndChallenges {
-  recent_progress: string;
-  emerging_trends: string[];
-  open_challenges: string[];
-  future_directions: string;
-}
+// -- Envelope ---------------------------------------------------------------
 
-export interface ExplorationReport {
+export interface LandscapeMeta {
   topic: string;
-  core_concepts: CoreConcept[];
-  key_scholars: ScholarProfile[];
-  must_read_papers: RecommendedPaper[];
-  trends_and_challenges: TrendsAndChallenges;
-  sources: string[];
+  generated_at: string;
+  paper_count: number;
+  version: number;
 }
 
-// ---------------------------------------------------------------------------
-// Monitoring domain — mirrors backend/src/agents/monitoring/schemas.py
-// ---------------------------------------------------------------------------
-
-export interface HotPaper {
+export interface PaperResult {
+  paper_id: string;
   title: string;
   authors: string[];
-  year: number;
+  abstract: string;
+  doi: string;
+  published_date: string;
+  pdf_url: string;
   url: string;
+  source: string;
+  categories: string[];
   citation_count: number;
-  relevance_reason: string;
 }
 
-export interface DailyBrief {
-  topic: string;
-  since_date: string;
-  new_hot_papers: HotPaper[];
-  trend_summary: string;
+export interface DynamicResearchLandscape {
+  meta: LandscapeMeta;
+  tech_tree: TechTree;
+  collaboration_network: CollaborationNetwork;
+  research_gaps: ResearchGaps;
+  papers: PaperResult[];
   sources: string[];
+}
+
+export interface LandscapeTaskListItem {
+  task_id: string;
+  topic: string;
+  status: TaskStatus;
+  progress_message: string;
+  has_result: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LandscapeIncrement {
+  new_papers: PaperResult[];
+  new_tech_nodes: TechTreeNode[];
+  new_tech_edges: TechTreeEdge[];
+  new_scholars: ScholarNode[];
+  new_collab_edges: CollaborationEdge[];
+  new_gaps: ResearchGap[];
+  detected_at: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,64 +148,65 @@ export interface ApiResponse<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Exploration task status
+// Task status (shared)
 // ---------------------------------------------------------------------------
 
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
-export interface TaskStatusData {
+export interface LandscapeTaskStatus {
   task_id: string;
   status: TaskStatus;
   progress_message: string;
-  result: ExplorationReport | null;
+  current_stage_id?: StageId | "";
+  current_progress_pct?: number;
+  progress_snapshot?: Record<string, LandscapeSSEEvent>;
+  result: DynamicResearchLandscape | null;
 }
 
 // ---------------------------------------------------------------------------
-// Monitoring task & brief (API-level shapes)
+// Pipeline stage tracking (for structured progress UI)
 // ---------------------------------------------------------------------------
 
-export interface MonitorTaskData {
-  id: string;
-  topic: string;
-  frequency: "daily" | "weekly";
-  is_active: boolean;
-  notify_email: string | null;
-  last_run_at: string | null;
-  created_at: string;
-}
+export type StageId =
+  | "scope"
+  | "retrieval"
+  | "taxonomy"
+  | "network"
+  | "gaps"
+  | "critic"
+  | "assembler";
 
-export interface CreateMonitorRequest {
-  topic: string;
-  frequency: "daily" | "weekly";
-  notify_email?: string | null;
-}
+export type StageStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 
-export interface BriefData {
-  id: string;
-  task_id: string;
-  brief_content: DailyBrief;
-  created_at: string;
+export interface PipelineStage {
+  id: StageId;
+  label: string;
+  index: number;
+  status: StageStatus;
+  messages: string[];
+  elapsed_s: number;
+  detail: Record<string, unknown> | null;
 }
-
-export interface DeleteMonitorTaskData {
-  id: string;
-  deleted: boolean;
-}
-
-export type MonitoringSSEEvent =
-  | { type: "task_started"; task_id: string; topic: string; at: string }
-  | { type: "task_completed"; task_id: string; topic: string; at: string }
-  | { type: "task_failed"; task_id: string; topic: string; at: string }
-  | { type: "ping" };
 
 // ---------------------------------------------------------------------------
 // SSE event discriminated union — mirrors backend SSE `data:` payloads
 // ---------------------------------------------------------------------------
 
-export type SSEEvent =
-  | { type: "progress"; message: string }
+export type LandscapeSSEEvent =
+  | {
+      type: "progress";
+      message: string;
+      stage_id?: StageId;
+      stage_index?: number;
+      stage_total?: number;
+      status?: string;
+      progress_pct?: number;
+      elapsed_s?: number;
+      detail?: Record<string, unknown>;
+      agent?: string;
+    }
   | { type: "status"; status: string }
-  | { type: "complete"; status: "completed"; result?: ExplorationReport }
+  | { type: "complete"; status: "completed"; result?: DynamicResearchLandscape }
   | { type: "error"; status: "failed"; message?: string }
   | { type: "timeout"; message: string };
 

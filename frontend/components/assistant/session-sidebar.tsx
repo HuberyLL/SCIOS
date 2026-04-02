@@ -136,34 +136,29 @@ export function SessionSidebar({
                   }
                 }}
                 className={cn(
-                  "group relative flex w-full cursor-pointer items-start gap-2 rounded-md px-2.5 py-2 pr-8 text-left transition-colors",
+                  "group flex w-full cursor-pointer flex-col gap-1.5 rounded-md px-2.5 py-2.5 text-left transition-colors",
                   currentSessionId === s.id
                     ? "bg-accent text-accent-foreground"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-xs font-medium">
+                <div className="flex items-start gap-2">
+                  <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span className="line-clamp-2 min-w-0 flex-1 text-xs font-medium leading-relaxed">
                     {s.title}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground/70">
-                    {formatDate(s.updated_at)}
-                  </div>
+                  </span>
+                  <button
+                    onClick={(e) => handleDelete(e, s.id)}
+                    title="Delete session"
+                    aria-label="Delete session"
+                    className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-                <button
-                  onClick={(e) => handleDelete(e, s.id)}
-                  title="Delete session"
-                  aria-label="Delete session"
-                  className={cn(
-                    "absolute right-2 top-2 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:bg-destructive/10 hover:text-destructive",
-                    currentSessionId === s.id
-                      ? "opacity-100"
-                      : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
-                  )}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
+                <div className="pl-[22px] text-[10px] text-muted-foreground/70">
+                  {formatDate(s.updated_at)}
+                </div>
               </div>
             ))}
 

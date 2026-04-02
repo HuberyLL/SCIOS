@@ -2,11 +2,8 @@ import type {
   ApiResponse,
   AssistantMessageOut,
   AssistantSession,
-  BriefData,
-  CreateMonitorRequest,
-  DeleteMonitorTaskData,
-  MonitorTaskData,
-  TaskStatusData,
+  LandscapeTaskListItem,
+  LandscapeTaskStatus,
 } from "@/types";
 
 class ApiError extends Error {
@@ -39,61 +36,40 @@ async function request<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Exploration
+// Landscape
 // ---------------------------------------------------------------------------
 
-export async function startExploration(
+export async function startLandscape(
   topic: string,
 ): Promise<{ task_id: string }> {
-  return request<{ task_id: string }>("/exploration/start", {
+  return request<{ task_id: string }>("/landscape/start", {
     method: "POST",
     body: JSON.stringify({ topic }),
   });
 }
 
-export async function getExplorationStatus(
+export async function getLandscapeStatus(
   taskId: string,
-): Promise<TaskStatusData> {
-  return request<TaskStatusData>(`/exploration/${taskId}/status`);
+): Promise<LandscapeTaskStatus> {
+  return request<LandscapeTaskStatus>(`/landscape/${taskId}/status`);
 }
 
-export function explorationStreamUrl(taskId: string): string {
-  return `/api/v1/exploration/${taskId}/stream`;
+export function landscapeStreamUrl(taskId: string): string {
+  return `/api/v1/landscape/${taskId}/stream`;
 }
 
-// ---------------------------------------------------------------------------
-// Monitoring
-// ---------------------------------------------------------------------------
-
-export async function createMonitorTask(
-  req: CreateMonitorRequest,
-): Promise<MonitorTaskData> {
-  return request<MonitorTaskData>("/monitoring/tasks", {
-    method: "POST",
-    body: JSON.stringify(req),
-  });
+export async function listLandscapeTasks(
+  limit = 50,
+): Promise<LandscapeTaskListItem[]> {
+  return request<LandscapeTaskListItem[]>(`/landscape/tasks?limit=${limit}`);
 }
 
-export async function listMonitorTasks(): Promise<MonitorTaskData[]> {
-  return request<MonitorTaskData[]>("/monitoring/tasks", {
-    cache: "no-store",
-  });
-}
-
-export async function listBriefs(taskId: string): Promise<BriefData[]> {
-  return request<BriefData[]>(`/monitoring/tasks/${taskId}/briefs`, {
-    cache: "no-store",
-  });
-}
-
-export async function deleteMonitorTask(taskId: string): Promise<DeleteMonitorTaskData> {
-  return request<DeleteMonitorTaskData>(`/monitoring/tasks/${taskId}`, {
+export async function deleteLandscapeTask(
+  taskId: string,
+): Promise<{ task_id: string; deleted: boolean }> {
+  return request<{ task_id: string; deleted: boolean }>(`/landscape/${taskId}`, {
     method: "DELETE",
   });
-}
-
-export function monitoringStreamUrl(): string {
-  return "/api/v1/monitoring/stream";
 }
 
 // ---------------------------------------------------------------------------

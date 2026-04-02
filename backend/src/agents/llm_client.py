@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, TypeVar
@@ -9,7 +10,8 @@ from typing import Any, TypeVar
 import litellm
 from pydantic import BaseModel
 from tenacity import (
-    retry,
+    AsyncRetrying,
+    RetryError,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -20,6 +22,40 @@ from src.core.config import get_settings
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
+
+class LLMFatalError(Exception):
+    """Raised for LLM errors that must never be retried (quota, billing, auth)."""
+
+
+_FATAL_KEYWORDS = frozenset({
+    "insufficient_quota",
+    "exceeded your current quota",
+    "billing_not_active",
+    "billing hard limit",
+    "account_deactivated",
+    "invalid_api_key",
+    "organization has been disabled",
+    "project has been deactivated",
+})
+
+_semaphore: asyncio.Semaphore | None = None
+_semaphore_limit: int = 0
+
+
+def _is_fatal(exc: BaseException) -> bool:
+    """Return True for errors that should never be retried."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in _FATAL_KEYWORDS)
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """Lazily create a per-event-loop semaphore to cap concurrent LLM calls."""
+    global _semaphore, _semaphore_limit
+    cfg = get_settings()
+    if _semaphore is None or _semaphore_limit != cfg.llm_max_concurrent:
+        _semaphore_limit = cfg.llm_max_concurrent
+        _semaphore = asyncio.Semaphore(_semaphore_limit)
+    return _semaphore
 
 
 def _default_model() -> str:
@@ -140,55 +176,28 @@ def _parse_structured_message(message: Any, response_format: type[T]) -> T:
         raise ValueError("LLM returned non-JSON or schema-invalid content")
 
 
-@retry(
-    retry=retry_if_exception_type(
-        (litellm.Timeout, litellm.RateLimitError, litellm.APIConnectionError)
-    ),
-    wait=wait_exponential(multiplier=2, min=2, max=30),
-    stop=stop_after_attempt(3),
-    reraise=True,
-)
-async def call_llm(
+# ---------------------------------------------------------------------------
+# Retry + concurrency-gated LLM call
+# ---------------------------------------------------------------------------
+
+
+async def _call_llm_once(
     messages: list[dict[str, str]],
     response_format: type[T],
     *,
     model: str | None = None,
     temperature: float = 0.3,
 ) -> T:
-    """Call an LLM via litellm and return a validated Pydantic object.
-
-    Parameters
-    ----------
-    messages : list of {"role": ..., "content": ...} dicts.
-    response_format : A ``BaseModel`` subclass. Sent as strict JSON schema
-        constraints, then validated back into the model.
-    model : Override the default model (env ``LLM_MODEL``).
-    temperature : Sampling temperature.
-
-    Returns
-    -------
-    An instance of *response_format* populated from the LLM response.
-
-    Raises
-    ------
-    ValueError
-        If the model refused to answer or returned schema-invalid content.
-    """
+    """Single LLM round-trip (no retry, no semaphore)."""
     cfg = get_settings()
     resolved_model = model or _default_model()
-
-    logger.debug(
-        "call_llm  model=%s  response_format=%s  messages=%d",
-        resolved_model,
-        response_format.__name__,
-        len(messages),
-    )
 
     kwargs: dict[str, Any] = {
         "model": resolved_model,
         "messages": messages,
         "response_format": _response_format_schema(response_format),
         "temperature": temperature,
+        "num_retries": 0,
     }
     if cfg.llm_api_key:
         kwargs["api_key"] = cfg.llm_api_key
@@ -202,3 +211,48 @@ async def call_llm(
 
     logger.debug("call_llm  tokens=%s", completion.usage)
     return _parse_structured_message(message, response_format)
+
+
+async def call_llm(
+    messages: list[dict[str, str]],
+    response_format: type[T],
+    *,
+    model: str | None = None,
+    temperature: float = 0.3,
+) -> T:
+    """Call an LLM via litellm and return a validated Pydantic object.
+
+    * Concurrency gated by a global semaphore (``llm_max_concurrent``).
+    * Retries handled by tenacity with **config-driven** parameters.
+    * ``insufficient_quota`` / billing errors fail immediately (no retry).
+    * OpenAI SDK built-in retries disabled (``num_retries=0``).
+    """
+    cfg = get_settings()
+    sem = _get_semaphore()
+
+    async with sem:
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type(
+                (litellm.Timeout, litellm.RateLimitError,
+                 litellm.APIConnectionError),
+            ),
+            wait=wait_exponential(
+                multiplier=2,
+                min=cfg.llm_retry_min_wait,
+                max=cfg.llm_retry_max_wait,
+            ),
+            stop=stop_after_attempt(cfg.llm_max_retries),
+            reraise=True,
+        ):
+            with attempt:
+                try:
+                    return await _call_llm_once(
+                        messages, response_format,
+                        model=model, temperature=temperature,
+                    )
+                except (litellm.RateLimitError,
+                        litellm.AuthenticationError) as exc:
+                    if _is_fatal(exc):
+                        raise LLMFatalError(str(exc)) from exc
+                    raise
+    raise RuntimeError("unreachable")

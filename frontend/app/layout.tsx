@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "SCIOS — Smart Research Agent",
-  description: "AI-powered academic topic exploration and monitoring",
+  description: "AI-powered academic research landscape and assistant",
 };
 
 export default function RootLayout({
