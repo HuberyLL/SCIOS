@@ -59,7 +59,13 @@ def _extract_author_details(raw: dict[str, Any]) -> list[dict[str, Any]]:
 def _paper_from_api(raw: dict[str, Any]) -> PaperResult:
     """Convert a Semantic Scholar API JSON object into a *PaperResult*."""
     authors_raw = raw.get("authors") or []
-    author_names = [a["name"] for a in authors_raw if isinstance(a, dict) and "name" in a]
+    author_names: list[str] = []
+    author_ids: list[str] = []
+    for a in authors_raw:
+        if not isinstance(a, dict) or "name" not in a:
+            continue
+        author_names.append(a["name"])
+        author_ids.append(a.get("authorId") or "")
 
     external_ids = raw.get("externalIds") or {}
     doi = external_ids.get("DOI", "")
@@ -71,6 +77,7 @@ def _paper_from_api(raw: dict[str, Any]) -> PaperResult:
         paper_id=raw.get("paperId", ""),
         title=raw.get("title", ""),
         authors=author_names,
+        author_ids=author_ids,
         abstract=raw.get("abstract") or "",
         doi=doi,
         published_date=raw.get("publicationDate") or str(raw.get("year", "")),
@@ -297,3 +304,115 @@ class SemanticScholarClient:
         if isinstance(data, list):
             return [item for item in data if item is not None]
         return []
+
+    # ------------------------------------------------------------------
+    # Title-based search (for seed paper anchoring)
+    # ------------------------------------------------------------------
+
+    async def search_by_title(
+        self,
+        title: str,
+        *,
+        fields: list[str] | None = None,
+    ) -> PaperResult | None:
+        """Find a paper by its exact (or near-exact) title.
+
+        Uses the standard search endpoint with the full title as query,
+        then picks the best match by normalized title similarity.
+        Returns ``None`` if no confident match is found.
+        """
+        result = await self.search_papers(
+            title, limit=5, fields=fields or ENRICHED_FIELDS,
+        )
+        if not result.papers:
+            return None
+
+        query_norm = title.strip().lower()
+        best: PaperResult | None = None
+        best_score = 0.0
+        for p in result.papers:
+            p_norm = p.title.strip().lower()
+            if p_norm == query_norm:
+                return p
+            score = _title_similarity(query_norm, p_norm)
+            if score > best_score:
+                best_score = score
+                best = p
+
+        if best_score >= 0.75:
+            return best
+        return None
+
+    # ------------------------------------------------------------------
+    # Author API
+    # ------------------------------------------------------------------
+
+    async def get_author(
+        self,
+        author_id: str,
+        *,
+        fields: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch a single author profile from ``GET /author/{id}``.
+
+        Returns raw S2 JSON dict so callers can build their own model.
+        """
+        default = [
+            "authorId", "name", "affiliations",
+            "paperCount", "citationCount", "hIndex",
+        ]
+        params = {"fields": ",".join(fields or default)}
+        try:
+            return await self._get(f"/author/{author_id}", params=params)
+        except httpx.HTTPStatusError:
+            logger.warning("S2 author not found: %s", author_id)
+            return None
+        except Exception as exc:
+            logger.error("S2 get_author error: %s", exc)
+            return None
+
+    async def get_author_papers(
+        self,
+        author_id: str,
+        *,
+        fields: list[str] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[PaperResult]:
+        """Return papers authored by *author_id*."""
+        paper_fields = fields or [
+            "paperId", "title", "abstract", "year",
+            "citationCount", "authors", "url",
+            "externalIds", "openAccessPdf",
+        ]
+        params: dict[str, Any] = {
+            "fields": ",".join(paper_fields),
+            "limit": min(limit, 1000),
+            "offset": offset,
+        }
+        try:
+            data = await self._get(
+                f"/author/{author_id}/papers", params=params,
+            )
+        except Exception as exc:
+            logger.error("S2 author papers error: %s", exc)
+            return []
+        return [
+            _paper_from_api(item.get("paper") or item)
+            for item in (data.get("data") or [])
+            if isinstance(item, dict)
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _title_similarity(a: str, b: str) -> float:
+    """Quick word-overlap ratio between two lowered title strings."""
+    words_a = set(a.split())
+    words_b = set(b.split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    return 2 * len(intersection) / (len(words_a) + len(words_b))

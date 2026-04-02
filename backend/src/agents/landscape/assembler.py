@@ -15,10 +15,10 @@ from src.models.landscape import (
     CollaborationNetwork,
     DynamicResearchLandscape,
     LandscapeMeta,
+    ResearchGaps,
+    TechTree,
 )
 from src.models.paper import PaperResult
-
-from .schemas import EnrichedRetrievedData, LandscapeAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,11 @@ def _sanitise_ids(ids: list[str], valid: set[str], context: str) -> list[str]:
 def assemble_landscape(
     *,
     topic: str,
-    analysis: LandscapeAnalysis,
+    papers: list[PaperResult],
+    tech_tree: TechTree,
     collaboration_network: CollaborationNetwork,
-    enriched_data: EnrichedRetrievedData,
+    research_gaps: ResearchGaps,
+    quality: str = "complete",
 ) -> DynamicResearchLandscape:
     """Combine all pipeline outputs into the final ``DynamicResearchLandscape``.
 
@@ -47,7 +49,6 @@ def assemble_landscape(
     produced by the LLM that does not appear in the actual papers list is
     silently removed so ``DynamicResearchLandscape.model_validator`` passes.
     """
-    papers: list[PaperResult] = [ep.paper for ep in enriched_data.enriched_papers]
     valid_ids = {p.paper_id for p in papers}
 
     sources: list[str] = []
@@ -59,34 +60,25 @@ def assemble_landscape(
         if p.doi and p.doi not in seen_sources:
             seen_sources.add(p.doi)
             sources.append(p.doi)
-    for wr in enriched_data.web_results:
-        for item in wr.results:
-            if item.url and item.url not in seen_sources:
-                seen_sources.add(item.url)
-                sources.append(item.url)
 
-    # Deep-copy LLM outputs to avoid mutating the originals
-    tech_tree = copy.deepcopy(analysis.tech_tree)
-    research_gaps = copy.deepcopy(analysis.research_gaps)
+    tt = copy.deepcopy(tech_tree)
+    rg = copy.deepcopy(research_gaps)
     collab = copy.deepcopy(collaboration_network)
 
-    # --- Sanitise TechTree ---
-    for node in tech_tree.nodes:
+    for node in tt.nodes:
         node.representative_paper_ids = _sanitise_ids(
             node.representative_paper_ids,
             valid_ids,
             f"TechTreeNode('{node.node_id}').representative_paper_ids",
         )
 
-    # --- Sanitise ResearchGaps ---
-    for gap in research_gaps.gaps:
+    for gap in rg.gaps:
         gap.evidence_paper_ids = _sanitise_ids(
             gap.evidence_paper_ids,
             valid_ids,
             f"ResearchGap('{gap.gap_id}').evidence_paper_ids",
         )
 
-    # --- Sanitise CollaborationNetwork ---
     for scholar in collab.nodes:
         scholar.top_paper_ids = _sanitise_ids(
             scholar.top_paper_ids,
@@ -105,13 +97,14 @@ def assemble_landscape(
         generated_at=datetime.now(timezone.utc),
         paper_count=len(papers),
         version=1,
+        quality=quality,  # type: ignore[arg-type]
     )
 
     landscape = DynamicResearchLandscape(
         meta=meta,
-        tech_tree=tech_tree,
+        tech_tree=tt,
         collaboration_network=collab,
-        research_gaps=research_gaps,
+        research_gaps=rg,
         papers=papers,
         sources=sources,
     )
@@ -120,7 +113,7 @@ def assemble_landscape(
         "Assembled DynamicResearchLandscape  papers=%d  sources=%d  "
         "tech_nodes=%d  scholars=%d  gaps=%d",
         len(papers), len(sources),
-        len(tech_tree.nodes), len(collab.nodes),
-        len(research_gaps.gaps),
+        len(tt.nodes), len(collab.nodes),
+        len(rg.gaps),
     )
     return landscape

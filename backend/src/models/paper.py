@@ -20,6 +20,11 @@ class PaperResult(BaseModel):
     paper_id: str
     title: str
     authors: list[str] = Field(default_factory=list)
+    author_ids: list[str] = Field(
+        default_factory=list,
+        description="S2 authorId for each author (parallel to 'authors'). "
+        "Empty string if unknown.",
+    )
     abstract: str = ""
     doi: str = ""
     published_date: str = ""

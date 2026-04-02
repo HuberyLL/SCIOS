@@ -34,8 +34,8 @@ class TechTreeNode(BaseModel):
 
     node_id: str = Field(..., description="Unique identifier used as the rendering key by the front-end.")
     label: str = Field(..., description="Display name (method name or short paper title).")
-    node_type: Literal["method", "paper", "milestone"] = Field(
-        ..., description="Semantic category of the node."
+    node_type: Literal["method", "paper", "milestone", "unverified"] = Field(
+        ..., description="Semantic category of the node. 'unverified' = degraded fallback."
     )
     year: int | None = Field(default=None, description="Publication or emergence year.")
     description: str = Field(..., description="1-2 sentence summary.")
@@ -192,6 +192,10 @@ class LandscapeMeta(BaseModel):
     generated_at: datetime = Field(..., description="Timestamp of generation.")
     paper_count: int = Field(default=0, description="Total papers included in the analysis.")
     version: int = Field(default=1, ge=1, description="Monotonically increasing; bumped on incremental updates.")
+    quality: Literal["complete", "degraded"] = Field(
+        default="complete",
+        description="'degraded' when pipeline encountered issues but produced usable output.",
+    )
 
 
 class DynamicResearchLandscape(BaseModel):
