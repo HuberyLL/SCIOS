@@ -118,11 +118,7 @@ export function CollaborationGraph({ data, paperMap, onScholarClick }: Collabora
         confine: true,
         extraCssText: "max-width:320px; white-space:normal;",
       },
-      legend: {
-        data: ["Existing", "New"],
-        bottom: 10,
-        textStyle: { fontSize: 11 },
-      },
+      legend: { show: false },
       series: [
         {
           type: "graph",

@@ -4,7 +4,14 @@
 
 // -- TechTree ---------------------------------------------------------------
 
-export type TechTreeNodeType = "method" | "paper" | "milestone";
+export type TechTreeNodeType =
+  | "foundation"
+  | "breakthrough"
+  | "incremental"
+  | "application"
+  | "survey"
+  | "unverified";
+
 export type TechTreeRelation =
   | "evolves_from"
   | "extends"
@@ -17,6 +24,8 @@ export interface TechTreeNode {
   node_type: TechTreeNodeType;
   year: number | null;
   description: string;
+  importance: number;
+  depth: number;
   representative_paper_ids: string[];
   is_new: boolean;
 }

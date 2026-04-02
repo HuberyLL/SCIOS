@@ -25,14 +25,15 @@ in ``estimated_complexity``).  Then follow the matching strategy:
   The volume is manageable.
 
 **broad** (sprawling meta-field like "deep learning" or "NLP"):
-- **seed_papers**: include only the highest-impact milestones that define
-  major paradigm shifts (≈10-20 maximum). Skip merely influential papers.
-- **sub_fields**: include the most impactful directions (≈8-12 maximum).
-  For any directions you deliberately omit, record their names in
+- **seed_papers**: include all genuine paradigm-shifting milestones.
+  Do not cap artificially — list every work that defined a major shift.
+- **sub_fields**: include every distinct research direction that has
+  a meaningful body of work. Do not impose an arbitrary limit — the
+  downstream pipeline can handle large numbers of sub-fields.
+  If any directions are too niche or premature, record their names in
   ``deprioritized_sub_fields`` so the user knows what was left out.
-- This constraint exists because downstream retrieval and analysis costs
-  scale with the number of sub-fields. Quality of coverage per sub-field
-  is more valuable than breadth.
+- Prioritise completeness: a technology evolution tree must capture all
+  important branches to be useful.
 
 ### seed_papers
 

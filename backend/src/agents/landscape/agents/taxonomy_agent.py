@@ -1,18 +1,23 @@
-"""Taxonomy Agent — data-driven tech tree with Map-Reduce LLM labelling.
+"""Taxonomy Agent — data-driven tech tree with hierarchical time-window
+clustering, Map-Reduce LLM labelling, and global topology inference.
 
-Architecture aligned with STORM/GPT-Researcher Map-Reduce patterns:
-  1. Build clusters from PaperCorpus (sub-field + co-citation)
+Pipeline:
+  1. Build clusters from PaperCorpus (sub-field x time-window splits)
   2. Small cluster: label directly via one LLM call
   3. Large cluster: Map (summarize in batches) -> Reduce (synthesize node)
-  4. Infer edges in batches from citation direction + LLM classification
-  5. Self-check: verify all sub-fields are covered
+  4. Infer edges from citation graph (batched LLM classification)
+  5. Global edge inference: LLM fills in missing relationships (batched)
+  6. Self-check: verify all sub-fields are covered
+  7. Post-processing: calibrate importance/depth, deduplicate edges
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
-from collections import defaultdict
+import math
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -33,6 +38,8 @@ from ..prompts.taxonomy_prompts import (
     CLUSTER_SUMMARIZE_USER,
     EDGE_INFERENCE_SYSTEM,
     EDGE_INFERENCE_USER,
+    GLOBAL_EDGE_INFERENCE_SYSTEM,
+    GLOBAL_EDGE_INFERENCE_USER,
     TAXONOMY_SELF_CHECK_SYSTEM,
     TAXONOMY_SELF_CHECK_USER,
 )
@@ -41,11 +48,17 @@ from .base import BaseAgent, ProgressCallback
 
 logger = logging.getLogger(__name__)
 
-# Per-unit batch sizes for LLM calls (how many items per single LLM call)
-BATCH_SIZE = 50             # papers per LLM call (map phase)
-MAX_ABSTRACT_CHARS = 400    # abstract truncation per paper (lower to fit bigger batches)
-EDGE_BATCH_SIZE = 40        # edge pairs per LLM call
-LARGE_CLUSTER_THRESHOLD = 120
+BATCH_SIZE = 50
+MAX_ABSTRACT_CHARS = 400
+EDGE_BATCH_SIZE = 40
+GLOBAL_EDGE_BATCH_SIZE = 60
+SPLIT_WINDOW_YEARS = 4
+MIN_PAPERS_PER_WINDOW = 3
+
+NODE_TYPE = Literal[
+    "foundation", "breakthrough", "incremental",
+    "application", "survey", "unverified",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -55,9 +68,14 @@ LARGE_CLUSTER_THRESHOLD = 120
 class _NodeLabel(BaseModel):
     node_id: str
     label: str
-    node_type: Literal["method", "paper", "milestone", "unverified"]
+    node_type: Literal[
+        "foundation", "breakthrough", "incremental",
+        "application", "survey", "unverified",
+    ]
     year: int | None = None
     description: str
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    depth: int = Field(default=0, ge=0)
     representative_paper_ids: list[str] = Field(default_factory=list)
 
 
@@ -84,8 +102,13 @@ class _MissingNode(BaseModel):
     node_id: str
     label: str
     description: str
-    node_type: Literal["method", "paper", "milestone", "unverified"] = "method"
+    node_type: Literal[
+        "foundation", "breakthrough", "incremental",
+        "application", "survey", "unverified",
+    ] = "incremental"
     year: int | None = None
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    depth: int = Field(default=0, ge=0)
 
 
 class _SelfCheckResult(BaseModel):
@@ -98,31 +121,42 @@ class _SelfCheckResult(BaseModel):
 
 @dataclass
 class _Cluster:
-    """A group of papers sharing a sub-field or co-citation community."""
+    """A group of papers sharing a sub-field and time window."""
     name: str
+    sub_field: str
     paper_ids: list[str] = field(default_factory=list)
+
+
+def _cluster_slug(cluster_name: str) -> str:
+    """Short deterministic suffix from cluster name to make node_ids unique."""
+    return hashlib.sha1(cluster_name.encode()).hexdigest()[:6]
 
 
 def _build_clusters(
     corpus: PaperCorpus,
     scope: ScopeDefinition,
 ) -> list[_Cluster]:
-    """Build clusters primarily from sub_field_mapping, with a catch-all
-    cluster for unassigned high-citation papers.
-
-    Large clusters (> LARGE_CLUSTER_THRESHOLD papers) are automatically
-    split by time era so that each chunk produces a distinct TechTreeNode.
+    """Build fine-grained clusters by splitting each sub-field into
+    time windows of ~SPLIT_WINDOW_YEARS years.  This yields 3-5 clusters
+    per sub-field instead of the previous 1:1 mapping.
     """
     assigned: set[str] = set()
     clusters: list[_Cluster] = []
     pid_set = _pid_set(corpus)
     lookup = _paper_lookup(corpus)
 
+    time_start = scope.time_range_start
+    time_end = scope.time_range_end
+
     for sf_name, pids in corpus.sub_field_mapping.items():
         valid = [pid for pid in pids if pid in pid_set]
-        if valid:
-            clusters.extend(_maybe_split_cluster(sf_name, valid, lookup))
-            assigned.update(valid)
+        if not valid:
+            continue
+        sf_clusters = _split_by_time_window(
+            sf_name, sf_name, valid, lookup, time_start, time_end,
+        )
+        clusters.extend(sf_clusters)
+        assigned.update(valid)
 
     if corpus.papers:
         cite_counts = sorted(
@@ -143,19 +177,24 @@ def _build_clusters(
         unassigned_high_cite.sort(key=lambda p: p.citation_count, reverse=True)
         foundation_ids = [p.paper_id for p in unassigned_high_cite]
         clusters.extend(
-            _maybe_split_cluster("core_foundations", foundation_ids, lookup),
+            _split_by_time_window(
+                "core_foundations", "core_foundations",
+                foundation_ids, lookup, time_start, time_end,
+            ),
         )
+        assigned.update(foundation_ids)
 
     for seed_id in corpus.seed_paper_ids:
         if seed_id not in assigned:
             for c in clusters:
-                if c.name.startswith("core_foundations"):
+                if c.sub_field == "core_foundations":
                     if seed_id not in c.paper_ids:
                         c.paper_ids.insert(0, seed_id)
                     break
             else:
                 clusters.append(_Cluster(
                     name="core_foundations",
+                    sub_field="core_foundations",
                     paper_ids=[seed_id],
                 ))
             assigned.add(seed_id)
@@ -163,38 +202,58 @@ def _build_clusters(
     return [c for c in clusters if c.paper_ids]
 
 
-def _maybe_split_cluster(
-    name: str,
+def _split_by_time_window(
+    base_name: str,
+    sub_field: str,
     pids: list[str],
     lookup: dict[str, PaperResult],
+    time_start: int,
+    time_end: int,
 ) -> list[_Cluster]:
-    """Split a cluster by time era if it exceeds LARGE_CLUSTER_THRESHOLD."""
-    if len(pids) <= LARGE_CLUSTER_THRESHOLD:
-        return [_Cluster(name=name, paper_ids=pids)]
+    """Split papers into time-window clusters. Small windows are merged
+    into their nearest neighbour to avoid tiny clusters."""
+    span = max(time_end - time_start, 1)
+    n_windows = max(span // SPLIT_WINDOW_YEARS, 1)
+    window_size = max(span / n_windows, 1)
 
-    by_era: dict[str, list[str]] = defaultdict(list)
+    buckets: dict[int, list[str]] = defaultdict(list)
     for pid in pids:
         p = lookup.get(pid)
-        if p:
-            year_str = (p.published_date or "")[:4]
-            if year_str.isdigit():
-                y = int(year_str)
-                if y < 2018:
-                    by_era["early"].append(pid)
-                elif y < 2022:
-                    by_era["mid"].append(pid)
-                else:
-                    by_era["recent"].append(pid)
-            else:
-                by_era["recent"].append(pid)
+        year_str = ((p.published_date or "")[:4]) if p else ""
+        if year_str.isdigit():
+            y = int(year_str)
+            window_idx = min(int((y - time_start) / window_size), n_windows - 1)
+            window_idx = max(window_idx, 0)
         else:
-            by_era["recent"].append(pid)
+            window_idx = n_windows - 1
+        buckets[window_idx].append(pid)
+
+    sorted_idxs = sorted(buckets.keys())
+    merged: list[tuple[int, list[str]]] = []
+    for idx in sorted_idxs:
+        if merged and len(merged[-1][1]) < MIN_PAPERS_PER_WINDOW:
+            merged[-1] = (merged[-1][0], merged[-1][1] + buckets[idx])
+        else:
+            merged.append((idx, list(buckets[idx])))
+
+    if len(merged) > 1 and len(merged[-1][1]) < MIN_PAPERS_PER_WINDOW:
+        last = merged.pop()
+        merged[-1] = (merged[-1][0], merged[-1][1] + last[1])
+
+    if len(merged) <= 1:
+        return [_Cluster(name=base_name, sub_field=sub_field, paper_ids=pids)]
 
     result: list[_Cluster] = []
-    for era, era_pids in by_era.items():
-        if era_pids:
-            result.append(_Cluster(name=f"{name}_{era}", paper_ids=era_pids))
-    return result if result else [_Cluster(name=name, paper_ids=pids)]
+    for win_idx, win_pids in merged:
+        year_lo = int(time_start + win_idx * window_size)
+        year_hi = min(int(year_lo + window_size - 1), time_end)
+        tag = f"{year_lo}-{year_hi}"
+        result.append(_Cluster(
+            name=f"{base_name}_{tag}",
+            sub_field=sub_field,
+            paper_ids=win_pids,
+        ))
+    return result
 
 
 def _pid_set(corpus: PaperCorpus) -> set[str]:
@@ -206,7 +265,6 @@ def _paper_lookup(corpus: PaperCorpus) -> dict[str, PaperResult]:
 
 
 def _format_paper(p: PaperResult) -> str:
-    """Format a single paper for LLM prompt."""
     abstract = (p.abstract or "")[:MAX_ABSTRACT_CHARS]
     if len(p.abstract or "") > MAX_ABSTRACT_CHARS:
         abstract += "…"
@@ -220,6 +278,167 @@ def _format_paper(p: PaperResult) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Post-processing helpers
+# ---------------------------------------------------------------------------
+
+def _calibrate_importance(
+    nodes: list[TechTreeNode],
+    lookup: dict[str, PaperResult],
+) -> None:
+    """Blend LLM importance with citation data and normalise to [0.2, 1.0]."""
+    citation_sums: list[float] = []
+    for n in nodes:
+        total = 0
+        for pid in n.representative_paper_ids:
+            p = lookup.get(pid)
+            if p:
+                total += p.citation_count
+        citation_sums.append(float(total))
+
+    max_cite = max(citation_sums) if citation_sums else 1.0
+    if max_cite == 0:
+        max_cite = 1.0
+
+    raw_scores: list[float] = []
+    for n, cite_sum in zip(nodes, citation_sums):
+        cite_imp = math.log1p(cite_sum) / math.log1p(max_cite) if n.representative_paper_ids else n.importance
+        blended = 0.4 * n.importance + 0.6 * cite_imp if n.representative_paper_ids else n.importance
+        raw_scores.append(blended)
+
+    lo = min(raw_scores) if raw_scores else 0.0
+    hi = max(raw_scores) if raw_scores else 1.0
+    span = hi - lo if hi > lo else 1.0
+
+    for n, raw in zip(nodes, raw_scores):
+        normalised = (raw - lo) / span
+        n.importance = round(0.2 + normalised * 0.8, 3)
+
+
+def _calibrate_depth(
+    nodes: list[TechTreeNode],
+    edges: list[TechTreeEdge],
+) -> list[TechTreeEdge]:
+    """Compute depth via topological sort.  Cycles are detected with DFS
+    and the back-edges that close them are removed from *edges* so that
+    the returned list is a DAG.  Node depths are set in-place."""
+    node_ids = {n.node_id for n in nodes}
+    adj: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    edge_list: list[TechTreeEdge] = []
+
+    for e in edges:
+        if e.source in node_ids and e.target in node_ids:
+            idx = len(edge_list)
+            adj[e.source].append((e.target, idx))
+            edge_list.append(e)
+
+    # Iterative DFS cycle detection — mark back-edge indices for removal
+    WHITE, GRAY, BLACK = 0, 1, 2
+    colour: dict[str, int] = {nid: WHITE for nid in node_ids}
+    back_edge_indices: set[int] = set()
+
+    for start in node_ids:
+        if colour[start] != WHITE:
+            continue
+        stack: list[tuple[str, int]] = [(start, 0)]
+        colour[start] = GRAY
+        while stack:
+            u, ei = stack[-1]
+            neighbors = adj[u]
+            if ei < len(neighbors):
+                stack[-1] = (u, ei + 1)
+                v, idx = neighbors[ei]
+                if colour.get(v, WHITE) == GRAY:
+                    back_edge_indices.add(idx)
+                elif colour.get(v, WHITE) == WHITE:
+                    colour[v] = GRAY
+                    stack.append((v, 0))
+            else:
+                colour[u] = BLACK
+                stack.pop()
+
+    if back_edge_indices:
+        logger.warning(
+            "Removed %d back-edge(s) to break cycles in tech tree",
+            len(back_edge_indices),
+        )
+
+    dag_edges = [e for i, e in enumerate(edge_list) if i not in back_edge_indices]
+
+    # Kahn topo-sort on the clean DAG
+    dag_adj: dict[str, list[str]] = defaultdict(list)
+    in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
+    for e in dag_edges:
+        dag_adj[e.source].append(e.target)
+        in_degree[e.target] = in_degree.get(e.target, 0) + 1
+
+    queue: deque[str] = deque(
+        nid for nid in node_ids if in_degree[nid] == 0
+    )
+    depth_map: dict[str, int] = {}
+    while queue:
+        nid = queue.popleft()
+        depth_map.setdefault(nid, 0)
+        for child in dag_adj[nid]:
+            depth_map[child] = max(depth_map.get(child, 0), depth_map[nid] + 1)
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                queue.append(child)
+
+    for n in nodes:
+        n.depth = depth_map.get(n.node_id, 0)
+
+    return dag_edges
+
+
+def _enforce_temporal_direction(
+    nodes: list[TechTreeNode],
+    edges: list[TechTreeEdge],
+) -> list[TechTreeEdge]:
+    """Ensure all edges flow from older (source) to newer (target).
+    Dagre TB layout then naturally places older nodes on top."""
+    year_map = {n.node_id: (n.year or 9999) for n in nodes}
+    flipped = 0
+    result: list[TechTreeEdge] = []
+    for e in edges:
+        src_year = year_map.get(e.source, 9999)
+        tgt_year = year_map.get(e.target, 9999)
+        if src_year > tgt_year:
+            result.append(TechTreeEdge(
+                source=e.target, target=e.source,
+                relation=e.relation, label=e.label,
+            ))
+            flipped += 1
+        else:
+            result.append(e)
+    if flipped:
+        logger.info("Flipped %d edge(s) to enforce temporal direction", flipped)
+    return result
+
+
+def _deduplicate_edges(edges: list[TechTreeEdge]) -> list[TechTreeEdge]:
+    """Final edge dedup: keep first occurrence per directed pair, and
+    prevent 2-cycles for directional relations (evolves_from, extends)."""
+    seen_directed: set[tuple[str, str]] = set()
+    seen_undirected: set[frozenset[str]] = set()
+    directional = {"evolves_from", "extends"}
+    result: list[TechTreeEdge] = []
+
+    for e in edges:
+        pair = (e.source, e.target)
+        if pair in seen_directed:
+            continue
+        upair = frozenset({e.source, e.target})
+        if e.relation in directional and upair in seen_undirected:
+            continue
+        seen_directed.add(pair)
+        if e.relation in directional:
+            seen_undirected.add(upair)
+        result.append(e)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Taxonomy Agent
 # ---------------------------------------------------------------------------
 
@@ -229,7 +448,8 @@ class TaxonomyInput(BaseModel):
 
 
 class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
-    """Stage 3: build a data-driven TechTree with Map-Reduce LLM labelling."""
+    """Stage 3: build a data-driven TechTree with hierarchical clustering,
+    Map-Reduce LLM labelling, and global topology inference."""
 
     def __init__(self) -> None:
         super().__init__(name="TaxonomyAgent")
@@ -244,12 +464,12 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         scope = input_data.scope
         lookup = _paper_lookup(corpus)
 
-        # Step 1 & 2: cluster papers
-        await self._notify(on_progress, "clustering papers by sub-field …")
+        # Step 1: cluster papers (sub-field x time-window)
+        await self._notify(on_progress, "clustering papers by sub-field and time window …")
         clusters = _build_clusters(corpus, scope)
         self._logger.info("Built %d clusters", len(clusters))
 
-        # Step 3: LLM label each cluster (Map-Reduce for large clusters)
+        # Step 2: LLM label each cluster (node_id made unique per cluster)
         await self._notify(on_progress, "labelling %d clusters …" % len(clusters))
         nodes: list[TechTreeNode] = []
         cluster_node_map: dict[str, str] = {}
@@ -273,28 +493,38 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
             fallback_nodes = self._subfield_fallback_nodes(scope, corpus)
             nodes.extend(fallback_nodes)
 
-        # Step 4: Infer edges (batched)
-        await self._notify(on_progress, "inferring relationships between nodes …")
-        edges = await self._infer_edges(nodes, clusters, corpus, cluster_node_map)
+        # Step 3: Infer edges from citations (batched)
+        await self._notify(on_progress, "inferring citation-based relationships …")
+        citation_edges = await self._infer_edges(
+            nodes, clusters, corpus, cluster_node_map,
+        )
+
+        # Step 4: Global edge inference (batched, LLM fills missing links)
+        await self._notify(on_progress, "inferring global topology …")
+        all_edges = await self._infer_global_edges(nodes, citation_edges)
 
         # Step 5: Self-check for missing sub-fields
         await self._notify(on_progress, "checking sub-field coverage …")
         extra_nodes = await self._self_check(scope, nodes, corpus)
         nodes.extend(extra_nodes)
 
-        # Deduplicate
-        seen_ids: set[str] = set()
-        unique_nodes: list[TechTreeNode] = []
-        for n in nodes:
-            if n.node_id not in seen_ids:
-                seen_ids.add(n.node_id)
-                unique_nodes.append(n)
+        # Step 6: Deduplicate nodes (merge on collision)
+        unique_nodes = self._merge_duplicate_nodes(nodes)
 
+        # Step 7: Deduplicate edges + filter dangling
         node_ids = {n.node_id for n in unique_nodes}
-        valid_edges = [
-            e for e in edges
+        valid_edges = _deduplicate_edges([
+            e for e in all_edges
             if e.source in node_ids and e.target in node_ids
-        ]
+        ])
+
+        # Step 7.5: Enforce temporal direction (older→newer for dagre TB)
+        valid_edges = _enforce_temporal_direction(unique_nodes, valid_edges)
+
+        # Step 8: Calibrate importance & depth (depth also removes cycle edges)
+        await self._notify(on_progress, "calibrating node metrics …")
+        _calibrate_importance(unique_nodes, lookup)
+        valid_edges = _calibrate_depth(unique_nodes, valid_edges)
 
         tree = TechTree(nodes=unique_nodes, edges=valid_edges)
         self._logger.info(
@@ -303,7 +533,34 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         return tree
 
     # ------------------------------------------------------------------
-    # Step 3: Label a cluster — direct or Map-Reduce
+    # Node dedup: merge rather than silently drop
+    # ------------------------------------------------------------------
+
+    def _merge_duplicate_nodes(
+        self, nodes: list[TechTreeNode],
+    ) -> list[TechTreeNode]:
+        """When two nodes share the same node_id, keep the one with higher
+        importance and merge their representative_paper_ids."""
+        index: dict[str, TechTreeNode] = {}
+        for n in nodes:
+            if n.node_id not in index:
+                index[n.node_id] = n
+            else:
+                existing = index[n.node_id]
+                merged_pids = list(dict.fromkeys(
+                    existing.representative_paper_ids + n.representative_paper_ids,
+                ))
+                winner = n if n.importance > existing.importance else existing
+                winner.representative_paper_ids = merged_pids
+                index[n.node_id] = winner
+                self._logger.warning(
+                    "Merged duplicate node_id '%s' (kept importance=%.2f, %d papers)",
+                    n.node_id, winner.importance, len(merged_pids),
+                )
+        return list(index.values())
+
+    # ------------------------------------------------------------------
+    # Step 2: Label a cluster — direct or Map-Reduce
     # ------------------------------------------------------------------
 
     async def _label_cluster(
@@ -317,23 +574,21 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         papers.sort(key=lambda p: p.citation_count, reverse=True)
 
         if len(papers) <= BATCH_SIZE:
-            return await self._label_direct(idx, cluster.name, papers, corpus)
+            return await self._label_direct(idx, cluster, papers, corpus)
 
-        # Map-Reduce for large clusters
         self._logger.info(
             "Cluster '%s' has %d papers, using Map-Reduce",
             cluster.name, len(papers),
         )
-        return await self._label_map_reduce(idx, cluster.name, papers, corpus)
+        return await self._label_map_reduce(idx, cluster, papers, corpus)
 
     async def _label_direct(
         self,
         idx: int,
-        cluster_name: str,
+        cluster: _Cluster,
         papers: list[PaperResult],
         corpus: PaperCorpus,
     ) -> TechTreeNode | None:
-        """Label a small cluster with a single LLM call."""
         papers_text = "\n".join(_format_paper(p) for p in papers) or "(no papers)"
 
         try:
@@ -342,36 +597,38 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                     {"role": "system", "content": CLUSTER_LABEL_SYSTEM},
                     {"role": "user", "content": CLUSTER_LABEL_USER.format(
                         cluster_idx=idx + 1,
-                        cluster_hint=cluster_name,
+                        cluster_hint=cluster.name,
                         papers_text=papers_text,
                     )},
                 ],
                 response_format=_NodeLabel,
             )
         except Exception:
-            self._logger.warning("Cluster labelling failed for '%s'", cluster_name)
+            self._logger.warning("Cluster labelling failed for '%s'", cluster.name)
             return None
 
         valid_pids = _pid_set(corpus)
         rep_ids = [pid for pid in label.representative_paper_ids if pid in valid_pids]
+        unique_id = f"{label.node_id}__{_cluster_slug(cluster.name)}"
 
         return TechTreeNode(
-            node_id=label.node_id,
+            node_id=unique_id,
             label=label.label,
             node_type=label.node_type,
             year=label.year,
             description=label.description,
+            importance=label.importance,
+            depth=label.depth,
             representative_paper_ids=rep_ids,
         )
 
     async def _label_map_reduce(
         self,
         idx: int,
-        cluster_name: str,
+        cluster: _Cluster,
         papers: list[PaperResult],
         corpus: PaperCorpus,
     ) -> TechTreeNode | None:
-        """Map-Reduce: summarize batches with bounded concurrency, then synthesize."""
         batches = [
             papers[i : i + BATCH_SIZE]
             for i in range(0, len(papers), BATCH_SIZE)
@@ -388,7 +645,7 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                         [
                             {"role": "system", "content": CLUSTER_SUMMARIZE_SYSTEM},
                             {"role": "user", "content": CLUSTER_SUMMARIZE_USER.format(
-                                cluster_hint=cluster_name,
+                                cluster_hint=cluster.name,
                                 batch_idx=batch_idx + 1,
                                 batch_total=total_batches,
                                 papers_text=papers_text,
@@ -399,7 +656,7 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                 except Exception:
                     self._logger.warning(
                         "Batch %d/%d summarization failed for '%s'",
-                        batch_idx + 1, total_batches, cluster_name,
+                        batch_idx + 1, total_batches, cluster.name,
                     )
                     return None
 
@@ -409,10 +666,9 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         valid_summaries = [s for s in summaries if s is not None]
 
         if not valid_summaries:
-            self._logger.warning("All batch summaries failed for '%s', falling back to direct", cluster_name)
-            return await self._label_direct(idx, cluster_name, papers[:BATCH_SIZE], corpus)
+            self._logger.warning("All batch summaries failed for '%s', falling back to direct", cluster.name)
+            return await self._label_direct(idx, cluster, papers[:BATCH_SIZE], corpus)
 
-        # Reduce phase: synthesize summaries into a single node
         summaries_text = "\n\n".join(
             f"--- Batch {i+1} ---\n"
             f"Themes: {', '.join(s.themes)}\n"
@@ -428,7 +684,7 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                 [
                     {"role": "system", "content": CLUSTER_REDUCE_SYSTEM},
                     {"role": "user", "content": CLUSTER_REDUCE_USER.format(
-                        cluster_hint=cluster_name,
+                        cluster_hint=cluster.name,
                         batch_count=len(valid_summaries),
                         total_papers=len(papers),
                         summaries_text=summaries_text,
@@ -437,23 +693,26 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                 response_format=_NodeLabel,
             )
         except Exception:
-            self._logger.warning("Reduce phase failed for '%s'", cluster_name)
+            self._logger.warning("Reduce phase failed for '%s'", cluster.name)
             return None
 
         valid_pids = _pid_set(corpus)
         rep_ids = [pid for pid in label.representative_paper_ids if pid in valid_pids]
+        unique_id = f"{label.node_id}__{_cluster_slug(cluster.name)}"
 
         return TechTreeNode(
-            node_id=label.node_id,
+            node_id=unique_id,
             label=label.label,
             node_type=label.node_type,
             year=label.year,
             description=label.description,
+            importance=label.importance,
+            depth=label.depth,
             representative_paper_ids=rep_ids,
         )
 
     # ------------------------------------------------------------------
-    # Step 4: Infer edges — batched
+    # Step 3: Infer edges from citation graph (batched)
     # ------------------------------------------------------------------
 
     async def _infer_edges(
@@ -463,7 +722,6 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         corpus: PaperCorpus,
         cluster_node_map: dict[str, str],
     ) -> list[TechTreeEdge]:
-        """Find citation links between clusters and classify in batches."""
         node_id_set = {n.node_id for n in nodes}
 
         pid_to_cluster: dict[str, str] = {}
@@ -485,8 +743,8 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                     cross_cluster_links[(src_node, tgt_node)] += 1
 
         if not cross_cluster_links:
-            self._logger.info("No cross-cluster citation links found, inferring time-based edges")
-            return self._time_based_edges(nodes)
+            self._logger.info("No cross-cluster citation links found, using sub-field time chains")
+            return self._time_based_edges(nodes, clusters, cluster_node_map)
 
         sorted_links = sorted(cross_cluster_links.items(), key=lambda x: x[1], reverse=True)
 
@@ -495,7 +753,6 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
             for n in nodes if n.node_id in node_id_set
         )
 
-        # Process edges in batches
         all_edges: list[TechTreeEdge] = []
         for batch_start in range(0, len(sorted_links), EDGE_BATCH_SIZE):
             batch_links = sorted_links[batch_start : batch_start + EDGE_BATCH_SIZE]
@@ -530,23 +787,161 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                 )
 
         if not all_edges:
-            self._logger.info("All edge inference failed, using time-based fallback")
-            return self._time_based_edges(nodes)
+            self._logger.info("All edge inference failed, using sub-field time chains")
+            return self._time_based_edges(nodes, clusters, cluster_node_map)
 
         return all_edges
 
-    @staticmethod
-    def _time_based_edges(nodes: list[TechTreeNode]) -> list[TechTreeEdge]:
-        """Fallback: connect nodes chronologically (marked as temporal_fallback)."""
+    # ------------------------------------------------------------------
+    # Step 4: Global edge inference — batched LLM fills missing links
+    # ------------------------------------------------------------------
+
+    async def _infer_global_edges(
+        self,
+        nodes: list[TechTreeNode],
+        existing_edges: list[TechTreeEdge],
+    ) -> list[TechTreeEdge]:
+        """Use LLM domain knowledge to fill in edges that citation data
+        alone cannot capture.  Sliding windows with 50% overlap ensure
+        cross-batch node pairs are visible to at least one LLM call."""
+        if len(nodes) < 2:
+            return existing_edges
+
+        node_id_set = {n.node_id for n in nodes}
+        existing_pairs: set[frozenset[str]] = {
+            frozenset({e.source, e.target}) for e in existing_edges
+        }
+
+        existing_edges_text = "\n".join(
+            f"- {e.source} --[{e.relation}]--> {e.target}"
+            + (f' "{e.label}"' if e.label else "")
+            for e in existing_edges
+        ) or "(none yet)"
+
         sorted_nodes = sorted(nodes, key=lambda n: n.year or 9999)
+        new_edges = list(existing_edges)
+        added = 0
+
+        n_total = len(sorted_nodes)
+        bs = GLOBAL_EDGE_BATCH_SIZE
+        stride = max(1, bs // 2)
+
+        if n_total <= bs:
+            windows = [(0, n_total)]
+        else:
+            windows = []
+            start = 0
+            while start < n_total:
+                end = min(start + bs, n_total)
+                windows.append((start, end))
+                if end >= n_total:
+                    break
+                start += stride
+
+        for win_idx, (w_start, w_end) in enumerate(windows):
+            batch_nodes = sorted_nodes[w_start:w_end]
+            nodes_text = "\n".join(
+                f"- {n.node_id}: {n.label} ({n.year}, {n.node_type}, "
+                f"importance={n.importance:.1f}) — {n.description}"
+                for n in batch_nodes
+            )
+
+            try:
+                result = await call_llm(
+                    [
+                        {"role": "system", "content": GLOBAL_EDGE_INFERENCE_SYSTEM},
+                        {"role": "user", "content": GLOBAL_EDGE_INFERENCE_USER.format(
+                            nodes_text=nodes_text,
+                            existing_edges_text=existing_edges_text,
+                        )},
+                    ],
+                    response_format=_EdgeBatch,
+                )
+            except Exception:
+                self._logger.warning(
+                    "Global edge inference window %d/%d failed",
+                    win_idx + 1, len(windows),
+                )
+                continue
+
+            for ec in result.edges:
+                upair = frozenset({ec.source, ec.target})
+                if (
+                    upair not in existing_pairs
+                    and ec.source in node_id_set
+                    and ec.target in node_id_set
+                ):
+                    new_edges.append(TechTreeEdge(
+                        source=ec.source,
+                        target=ec.target,
+                        relation=ec.relation,
+                        label=ec.label,
+                    ))
+                    existing_pairs.add(upair)
+                    added += 1
+
+        if added:
+            self._logger.info("Global inference added %d edges (%d windows)", added, len(windows))
+        return new_edges
+
+    # ------------------------------------------------------------------
+    # Improved time-based fallback: sub-field chains, not a single chain
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _time_based_edges(
+        nodes: list[TechTreeNode],
+        clusters: list[_Cluster],
+        cluster_node_map: dict[str, str],
+    ) -> list[TechTreeEdge]:
+        """Fallback: chain nodes within the same sub-field chronologically,
+        then connect sub-field roots to the earliest foundation node."""
+        sf_nodes: dict[str, list[TechTreeNode]] = defaultdict(list)
+        node_lookup = {n.node_id: n for n in nodes}
+
+        for cluster in clusters:
+            nid = cluster_node_map.get(cluster.name)
+            if nid and nid in node_lookup:
+                sf_nodes[cluster.sub_field].append(node_lookup[nid])
+
         edges: list[TechTreeEdge] = []
-        for i in range(1, len(sorted_nodes)):
-            edges.append(TechTreeEdge(
-                source=sorted_nodes[i - 1].node_id,
-                target=sorted_nodes[i].node_id,
-                relation="inspires",
-                label="temporal_fallback",
-            ))
+        sf_roots: list[TechTreeNode] = []
+
+        for sf, sf_node_list in sf_nodes.items():
+            sorted_sf = sorted(sf_node_list, key=lambda n: n.year or 9999)
+            seen: set[str] = set()
+            deduped: list[TechTreeNode] = []
+            for n in sorted_sf:
+                if n.node_id not in seen:
+                    seen.add(n.node_id)
+                    deduped.append(n)
+            sorted_sf = deduped
+
+            for i in range(1, len(sorted_sf)):
+                edges.append(TechTreeEdge(
+                    source=sorted_sf[i - 1].node_id,
+                    target=sorted_sf[i].node_id,
+                    relation="evolves_from",
+                    label="",
+                ))
+            if sorted_sf:
+                sf_roots.append(sorted_sf[0])
+
+        foundation_nodes = [
+            n for n in nodes
+            if n.node_type == "foundation" and n.year is not None
+        ]
+        if foundation_nodes:
+            global_root = min(foundation_nodes, key=lambda n: n.year or 9999)
+            for root in sf_roots:
+                if root.node_id != global_root.node_id:
+                    edges.append(TechTreeEdge(
+                        source=global_root.node_id,
+                        target=root.node_id,
+                        relation="inspires",
+                        label="",
+                    ))
+
         return edges
 
     # ------------------------------------------------------------------
@@ -559,7 +954,6 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         cluster: _Cluster,
         lookup: dict[str, PaperResult],
     ) -> TechTreeNode:
-        """Build a degraded node from cluster metadata when LLM labelling fails."""
         top_papers = sorted(
             (lookup[pid] for pid in cluster.paper_ids if pid in lookup),
             key=lambda p: p.citation_count,
@@ -584,6 +978,8 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
             node_type="unverified",
             year=year,
             description=desc,
+            importance=0.3,
+            depth=0,
             representative_paper_ids=rep_ids,
         )
 
@@ -592,7 +988,6 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         scope: ScopeDefinition,
         corpus: PaperCorpus,
     ) -> list[TechTreeNode]:
-        """Create one node per scope sub-field as a last-resort fallback."""
         nodes: list[TechTreeNode] = []
         for i, sf in enumerate(scope.sub_fields):
             rep_ids = corpus.sub_field_mapping.get(sf.name, [])[:5]
@@ -602,6 +997,8 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                 node_type="unverified",
                 year=None,
                 description=sf.description,
+                importance=0.3,
+                depth=0,
                 representative_paper_ids=rep_ids,
             ))
         return nodes
@@ -616,7 +1013,6 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
         nodes: list[TechTreeNode],
         corpus: PaperCorpus,
     ) -> list[TechTreeNode]:
-        """Ask LLM if any sub-fields are missing from the tree."""
         sub_fields_text = "\n".join(
             f"- {sf.name}: {sf.description}" for sf in scope.sub_fields
         )
@@ -648,6 +1044,8 @@ class TaxonomyAgent(BaseAgent[TaxonomyInput, TechTree]):
                 node_type=mn.node_type,
                 year=mn.year,
                 description=mn.description,
+                importance=mn.importance,
+                depth=mn.depth,
                 representative_paper_ids=[],
             ))
 

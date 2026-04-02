@@ -27,18 +27,41 @@ from .paper import PaperResult
 class TechTreeNode(BaseModel):
     """A node in the technology-evolution tree.
 
-    Each node represents a method, technique, or milestone paper.
-    ``representative_paper_ids`` link back to entries in
-    ``DynamicResearchLandscape.papers`` for full traceability.
+    Each node represents a research contribution at a specific point in the
+    evolution of a field.  ``representative_paper_ids`` link back to entries
+    in ``DynamicResearchLandscape.papers`` for full traceability.
     """
 
     node_id: str = Field(..., description="Unique identifier used as the rendering key by the front-end.")
     label: str = Field(..., description="Display name (method name or short paper title).")
-    node_type: Literal["method", "paper", "milestone", "unverified"] = Field(
-        ..., description="Semantic category of the node. 'unverified' = degraded fallback."
+    node_type: Literal[
+        "foundation",
+        "breakthrough",
+        "incremental",
+        "application",
+        "survey",
+        "unverified",
+    ] = Field(
+        ...,
+        description=(
+            "Semantic category: foundation (field-defining), breakthrough (paradigm shift), "
+            "incremental (improvement on prior work), application (migration to new domain), "
+            "survey (review / systematisation), unverified (degraded fallback)."
+        ),
     )
     year: int | None = Field(default=None, description="Publication or emergence year.")
-    description: str = Field(..., description="1-2 sentence summary.")
+    description: str = Field(..., description="One-sentence summary of the core contribution or innovation.")
+    importance: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Normalised importance score (0-1) derived from citation impact and influence.",
+    )
+    depth: int = Field(
+        default=0,
+        ge=0,
+        description="Depth in the evolution tree. 0 = root / foundational work.",
+    )
     representative_paper_ids: list[str] = Field(
         default_factory=list,
         description="PaperResult.paper_id values associated with this node.",
