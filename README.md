@@ -39,7 +39,7 @@ Surface high-value open questions with evidence papers and suggested research di
 ### Assistant Mode
 Use the interactive assistant to search papers, edit LaTeX files, and compile PDFs directly in the local workspace.
 
-![Assistant mode screenshot](docs/assets/assisant.png)
+![Assistant mode screenshot](docs/assets/assistant.png)
 
 ## 🧰 Built-in Agent Tools
 
