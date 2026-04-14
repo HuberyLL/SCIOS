@@ -272,7 +272,7 @@ export function useLandscapeTaskStatus(
         }
         if (res.status === "running" || res.status === "pending") {
           setState((prev) => {
-            let next = {
+            let next: InternalState = {
               ...prev,
               status: res.status,
               progressPct: Math.max(
